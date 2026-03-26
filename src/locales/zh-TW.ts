@@ -8,7 +8,11 @@ export const zhTW = {
   'onboarding.title': '未來已來',
   'onboarding.subtitle': '下一世代的專業 AI',
   'onboarding.description': '搭載自行搭建的 Neural Engine，即時深度分析全球交易市場與多維度技術指標。',
-  'onboarding.button.start': '設定',
+  'onboarding.button.start': '設定已完成',
+  'onboarding.key.label': 'API 金鑰配置',
+  'onboarding.key.placeholder.google': '請輸入您的 Gemini API 金鑰',
+  'onboarding.key.placeholder.openai': '請輸入您的 OpenAI API 金鑰 (sk-...)',
+  'onboarding.key.placeholder.claude': '請輸入您的 Claude API 金鑰 (sk-ant-...)',
   'onboarding.beta.message': 'BETA 封測版 - 僅供邀請用戶',
 
   // Nav
@@ -32,10 +36,13 @@ export const zhTW = {
 
   // Settings
   'settings.title': '系統設定',
-  'settings.model.title': 'AI 模型選擇',
-  'settings.model.pulse.desc': '平衡速度與精確度',
-  'settings.model.neural.desc': '高波動市場專用',
-  'settings.model.quant.desc': '深度量化分析',
+  'settings.model.title': 'AI 供應商選擇',
+  'settings.model.google.name': 'Google Gemini',
+  'settings.model.google.desc': '強大的多模態模型 (預設)',
+  'settings.model.openai.name': 'OpenAI ChatGPT',
+  'settings.model.openai.desc': '業界領先的推論能力',
+  'settings.model.claude.name': 'Anthropic Claude',
+  'settings.model.claude.desc': '卓越的條理化邏輯分析',
   'settings.search.lang.title': '搜尋語系設定',
   'settings.search.lang.zh': '中文',
   'settings.search.lang.en': 'English',

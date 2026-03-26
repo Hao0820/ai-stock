@@ -3,7 +3,19 @@ import { motion } from 'motion/react';
 import { Activity, ChevronDown, Key, ShieldCheck, Zap, Lock, Sparkles, Globe } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
 
-export function OnboardingScreen({ onStart, selectedModel, setSelectedModel }: { onStart: () => void, selectedModel: string, setSelectedModel: (m: string) => void }) {
+export function OnboardingScreen({ 
+  onStart, 
+  selectedModel, 
+  setSelectedModel, 
+  apiKeys, 
+  setApiKeys 
+}: { 
+  onStart: () => void, 
+  selectedModel: string, 
+  setSelectedModel: (m: string) => void,
+  apiKeys: { google: string, openai: string, claude: string },
+  setApiKeys: React.Dispatch<React.SetStateAction<{ google: string, openai: string, claude: string }>>
+}) {
   const { t } = useTranslation();
   return (
     <div className="min-h-screen flex flex-col relative">
@@ -52,9 +64,9 @@ export function OnboardingScreen({ onStart, selectedModel, setSelectedModel }: {
                       onChange={(e) => setSelectedModel(e.target.value)}
                       className="w-full bg-surface-container-high/50 text-on-surface py-4 px-5 rounded-xl border border-outline-variant/30 focus:ring-1 focus:ring-primary/40 focus:border-primary/40 appearance-none cursor-pointer transition-all duration-300 outline-none"
                     >
-                      <option value="pulse-v2">Pulse Engine v2.4 Professional Edition</option>
-                      <option value="neural-alpha">Neural Alpha Sonnet Analysis</option>
-                      <option value="quant-max">QuantMax-7B Finance-Tuned</option>
+                      <option value="google">{t('settings.model.google.name')}</option>
+                      <option value="openai">{t('settings.model.openai.name')}</option>
+                      <option value="claude">{t('settings.model.claude.name')}</option>
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant group-focus-within:text-primary transition-colors">
                       <ChevronDown className="w-5 h-5" />
@@ -64,7 +76,7 @@ export function OnboardingScreen({ onStart, selectedModel, setSelectedModel }: {
 
                 <div className="text-left">
                   <label className="block text-xs font-semibold text-primary/70 mb-3 px-1 uppercase tracking-widest">
-                    API Key Configuration
+                    {t('onboarding.key.label')}
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">
@@ -72,7 +84,9 @@ export function OnboardingScreen({ onStart, selectedModel, setSelectedModel }: {
                     </span>
                     <input
                       type="password"
-                      placeholder="Enter your provider API key"
+                      placeholder={t(`onboarding.key.placeholder.${selectedModel}` as any)}
+                      value={apiKeys[selectedModel as keyof typeof apiKeys] || ''}
+                      onChange={(e) => setApiKeys(prev => ({ ...prev, [selectedModel]: e.target.value }))}
                       className="w-full bg-surface-container-high/50 text-on-surface py-4 pl-12 pr-5 rounded-xl border border-outline-variant/30 focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-all duration-300 placeholder:text-on-surface-variant/40 outline-none"
                     />
                   </div>

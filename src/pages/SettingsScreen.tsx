@@ -8,6 +8,8 @@ export function SettingsScreen({
   setTheme, 
   selectedModel, 
   setSelectedModel,
+  apiKeys,
+  setApiKeys,
   candleColorStyle,
   setCandleColorStyle,
   language,
@@ -18,6 +20,8 @@ export function SettingsScreen({
   setTheme: (t: 'light' | 'dark') => void,
   selectedModel: string,
   setSelectedModel: (m: string) => void,
+  apiKeys: { google: string, openai: string, claude: string },
+  setApiKeys: React.Dispatch<React.SetStateAction<{ google: string, openai: string, claude: string }>>,
   candleColorStyle: 'red-up' | 'green-up',
   setCandleColorStyle: (c: 'red-up' | 'green-up') => void,
   language: 'zh-TW' | 'en-US',
@@ -46,22 +50,34 @@ export function SettingsScreen({
               </div>
               <div className="grid grid-cols-1 gap-3">
                 { [
-                  { id: 'pulse-v2', name: 'Pulse Engine v2.4', desc: t('settings.model.pulse.desc') },
-                  { id: 'neural-alpha', name: 'Neural Alpha', desc: t('settings.model.neural.desc') },
-                  { id: 'quant-max', name: 'QuantMax-7B', desc: t('settings.model.quant.desc') }
+                  { id: 'google', name: t('settings.model.google.name'), desc: t('settings.model.google.desc') },
+                  { id: 'openai', name: t('settings.model.openai.name'), desc: t('settings.model.openai.desc') },
+                  { id: 'claude', name: t('settings.model.claude.name'), desc: t('settings.model.claude.desc') }
                 ].map((model) => (
-                  <button
-                    key={model.id}
-                    onClick={() => setSelectedModel(model.id)}
-                    className={`flex flex-col items-start p-4 rounded-xl border-2 transition-all ${
-                      selectedModel === model.id 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-outline-variant/20 bg-surface-container-low hover:border-outline-variant/50'
-                    }`}
-                  >
-                    <span className={`font-bold ${selectedModel === model.id ? 'text-primary' : 'text-on-surface'}`}>{model.name}</span>
-                    <span className="text-xs text-on-surface-variant mt-1">{model.desc}</span>
-                  </button>
+                  <div key={model.id} className="space-y-2">
+                    <button
+                      onClick={() => setSelectedModel(model.id)}
+                      className={`w-full flex flex-col items-start p-4 rounded-xl border-2 transition-all ${
+                        selectedModel === model.id 
+                          ? 'border-primary bg-primary/5' 
+                          : 'border-outline-variant/20 bg-surface-container-low hover:border-outline-variant/50'
+                      }`}
+                    >
+                      <span className={`font-bold ${selectedModel === model.id ? 'text-primary' : 'text-on-surface'}`}>{model.name}</span>
+                      <span className="text-xs text-on-surface-variant mt-1">{model.desc}</span>
+                    </button>
+                    {selectedModel === model.id && (
+                      <div className="px-1 py-1">
+                        <input
+                          type="password"
+                          placeholder={t(`onboarding.key.placeholder.${model.id}` as any)}
+                          value={apiKeys[model.id as keyof typeof apiKeys] || ''}
+                          onChange={(e) => setApiKeys(prev => ({ ...prev, [model.id]: e.target.value }))}
+                          className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-2.5 px-3 text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none placeholder:text-on-surface-variant/30"
+                        />
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>

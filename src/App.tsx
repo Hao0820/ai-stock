@@ -15,9 +15,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabState>('analysis');
   const [selectedStock, setSelectedStock] = useState<{ symbol: string, name: string } | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [selectedModel, setSelectedModel] = useState('pulse-v2');
+  const [selectedModel, setSelectedModel] = useState('google');
+  const [apiKeys, setApiKeys] = useState<{ google: string, openai: string, claude: string }>(() => {
+    try {
+      const saved = localStorage.getItem('ai-stock-keys');
+      return saved ? JSON.parse(saved) : { google: '', openai: '', claude: '' };
+    } catch {
+      return { google: '', openai: '', claude: '' };
+    }
+  });
   const [candleColorStyle, setCandleColorStyle] = useState<'red-up' | 'green-up'>('red-up');
   const { language, setLanguage } = useTranslation();
+
+  useEffect(() => {
+    localStorage.setItem('ai-stock-keys', JSON.stringify(apiKeys));
+  }, [apiKeys]);
 
   useEffect(() => {
     if (theme === 'light') {
@@ -60,6 +72,8 @@ export default function App() {
               onStart={handleStartAnalysis} 
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
+              apiKeys={apiKeys}
+              setApiKeys={setApiKeys}
             />
           </motion.div>
         )}
@@ -105,6 +119,8 @@ export default function App() {
               setTheme={setTheme} 
               selectedModel={selectedModel} 
               setSelectedModel={setSelectedModel} 
+              apiKeys={apiKeys}
+              setApiKeys={setApiKeys}
               candleColorStyle={candleColorStyle}
               setCandleColorStyle={setCandleColorStyle}
               language={language}

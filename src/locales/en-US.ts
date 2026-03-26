@@ -10,7 +10,11 @@ export const enUS: Translations = {
   'onboarding.title': 'The Future is Now',
   'onboarding.subtitle': 'Next-Gen Professional AI',
   'onboarding.description': 'Powered by our proprietary Neural Engine, conducting deep multi-dimensional analysis across global markets in real-time.',
-  'onboarding.button.start': 'Settings',
+  'onboarding.button.start': 'Finish Setup',
+  'onboarding.key.label': 'API Key Configuration',
+  'onboarding.key.placeholder.google': 'Enter your Gemini API key',
+  'onboarding.key.placeholder.openai': 'Enter your OpenAI API key (sk-...)',
+  'onboarding.key.placeholder.claude': 'Enter your Claude API key (sk-ant-...)',
   'onboarding.beta.message': 'BETA PREVIEW - INVITATION ONLY',
 
   // Nav
@@ -34,10 +38,13 @@ export const enUS: Translations = {
 
   // Settings
   'settings.title': 'System Settings',
-  'settings.model.title': 'AI Model selection',
-  'settings.model.pulse.desc': 'Balanced Speed & Accuracy',
-  'settings.model.neural.desc': 'High Volatility Specialist',
-  'settings.model.quant.desc': 'Deep Quant Analysis',
+  'settings.model.title': 'AI Provider Selection',
+  'settings.model.google.name': 'Google Gemini',
+  'settings.model.google.desc': 'Powerful Multi-modal Model',
+  'settings.model.openai.name': 'OpenAI ChatGPT',
+  'settings.model.openai.desc': 'Industry Leading Reasoning',
+  'settings.model.claude.name': 'Anthropic Claude',
+  'settings.model.claude.desc': 'Superior Structured Analysis',
   'settings.search.lang.title': 'Search & Interface Region',
   'settings.search.lang.zh': 'Chinese',
   'settings.search.lang.en': 'English',
