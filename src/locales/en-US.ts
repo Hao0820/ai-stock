@@ -5,16 +5,28 @@ export const enUS: Translations = {
   'common.loading': 'Loading...',
   'common.error': 'Error',
   'common.back': 'Back',
+  'common.reset': 'Reset All',
+  'common.copyright': '© 2026 AI STOCK. ALL RIGHTS RESERVED.',
+  'common.toast.success.paired': 'AI Provider Paired Successfully',
+  'common.toast.success.updated': 'Settings Updated',
+  'common.toast.success.unpaired': 'Provider Unpaired Successfully',
+  'common.toast.error.invalidKey': 'Validation Failed: {0}',
+  'common.toast.error.genericKey': 'Failed to validate key. Please try again.',
 
   // Onboarding
-  'onboarding.title': 'The Future is Now',
+  'onboarding.title': 'Stock Analysis',
   'onboarding.subtitle': 'Next-Gen Professional AI',
-  'onboarding.description': 'Powered by our proprietary Neural Engine, conducting deep multi-dimensional analysis across global markets in real-time.',
-  'onboarding.button.start': 'Finish Setup',
+  'onboarding.description': 'The most powerful AI stock analysis tool, supporting multiple models and global market data.',
+  'onboarding.status.validating': 'Validating API Key...',
+  'onboarding.model.label': 'Select AI Provider',
+  'onboarding.button.start': 'Pairing',
   'onboarding.key.label': 'API Key Configuration',
   'onboarding.key.placeholder.google': 'Enter your Gemini API key',
   'onboarding.key.placeholder.openai': 'Enter your OpenAI API key (sk-...)',
   'onboarding.key.placeholder.claude': 'Enter your Claude API key (sk-ant-...)',
+  'onboarding.feature.secure': 'Secure TLS 1.3',
+  'onboarding.feature.realtime': 'Real-time Analysis',
+  'onboarding.feature.global': 'Global Data',
   'onboarding.beta.message': 'BETA PREVIEW - INVITATION ONLY',
 
   // Nav
@@ -30,11 +42,17 @@ export const enUS: Translations = {
   'analysis.error.notFound': 'Could not find any symbol matching "{0}". Please check your query.',
   'analysis.button.searching': 'Searching Market...',
   'analysis.button.start': 'Start AI Analysis',
+  'analysis.model.provider': '{0} Provider',
 
   // History Tab
   'history.title': 'Recent Analysis',
+  'history.subtitle': 'Automated analysis logs and historical predictions',
   'history.empty.title': 'No Traces Found',
   'history.empty.desc': 'Your trading forecasts and analysis are securely encrypted here. You have not analyzed any symbols yet. Head over to the Analysis tab to run your first projection.',
+  'history.sentiment.bullish': 'Bullish',
+  'history.sentiment.bearish': 'Bearish',
+  'history.sentiment.neutral': 'Neutral',
+  'history.sentiment.correction': 'Correction',
 
   // Settings
   'settings.title': 'System Settings',
@@ -56,11 +74,16 @@ export const enUS: Translations = {
   'settings.theme.title': 'Interface Theme',
   'settings.theme.light': 'Light Mode',
   'settings.theme.dark': 'Dark Mode',
+  'settings.danger.title': 'Danger Zone',
+  'settings.danger.reset.button': 'Reset All Settings',
+  'settings.danger.reset.confirm': 'Are you sure you want to reset everything? This will clear all API keys, search history, and return to default interface.',
   'settings.privacy.title': 'Privacy On',
   'settings.privacy.desc': 'All analytics processed locally',
 
   // Detail Screen
   'detail.marketData': 'MARKET DATA',
+  'detail.loading.canvas': 'Rendering Canvas...',
+  'detail.error.chart': 'Chart Render Error:',
   'detail.indicators': 'Indicators',
   'detail.res.day': '1D',
   'detail.res.week': '1W',

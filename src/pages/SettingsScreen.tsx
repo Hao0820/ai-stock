@@ -1,6 +1,8 @@
 import React from 'react';
-import { Cpu, Sparkles, Sun, Moon, ShieldCheck, Lock, ArrowLeft, BarChart3, Globe } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Cpu, Sparkles, Sun, Moon, ShieldCheck, Lock, ArrowLeft, BarChart3, Globe, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
+import { validateApiKey, fetchAvailableModels } from '../api/ai';
 
 export function SettingsScreen({ 
   onBack,
@@ -13,7 +15,10 @@ export function SettingsScreen({
   candleColorStyle,
   setCandleColorStyle,
   language,
-  setLanguage
+  setLanguage,
+  onSuccess,
+  setAvailableModels,
+  onFullReset
 }: { 
   onBack: () => void,
   theme: 'light' | 'dark', 
@@ -25,9 +30,37 @@ export function SettingsScreen({
   candleColorStyle: 'red-up' | 'green-up',
   setCandleColorStyle: (c: 'red-up' | 'green-up') => void,
   language: 'zh-TW' | 'en-US',
-  setLanguage: (l: 'zh-TW' | 'en-US') => void
+  setLanguage: (l: 'zh-TW' | 'en-US') => void,
+  onSuccess: (msg: string) => void,
+  setAvailableModels: React.Dispatch<React.SetStateAction<Record<string, { id: string, name: string }[]>>>,
+  onFullReset: () => void
 }) {
   const { t } = useTranslation();
+  const [verifyingModel, setVerifyingModel] = React.useState<string | null>(null);
+  const [validationStatuses, setValidationStatuses] = React.useState<Record<string, 'valid' | 'invalid' | null>>({});
+
+  const handleVerify = async (modelId: string) => {
+    const key = apiKeys[modelId as keyof typeof apiKeys];
+    if (!key) return;
+
+    setVerifyingModel(modelId);
+    try {
+      await validateApiKey(key);
+      
+      // Fetch models and update state
+      const models = await fetchAvailableModels(key);
+      setAvailableModels(prev => ({ ...prev, [modelId]: models }));
+      
+      setValidationStatuses(prev => ({ ...prev, [modelId]: 'valid' }));
+      onSuccess(t('common.toast.success.paired'));
+    } catch (err: any) {
+      setValidationStatuses(prev => ({ ...prev, [modelId]: 'invalid' }));
+      onSuccess(t('common.toast.error.invalidKey', err.message));
+    } finally {
+      setVerifyingModel(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface flex flex-col">
       <header className="bg-surface-container-low flex items-center w-full px-6 h-16 fixed top-0 z-50">
@@ -67,14 +100,39 @@ export function SettingsScreen({
                       <span className="text-xs text-on-surface-variant mt-1">{model.desc}</span>
                     </button>
                     {selectedModel === model.id && (
-                      <div className="px-1 py-1">
-                        <input
-                          type="password"
-                          placeholder={t(`onboarding.key.placeholder.${model.id}` as any)}
-                          value={apiKeys[model.id as keyof typeof apiKeys] || ''}
-                          onChange={(e) => setApiKeys(prev => ({ ...prev, [model.id]: e.target.value }))}
-                          className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-2.5 px-3 text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none placeholder:text-on-surface-variant/30"
-                        />
+                      <div className="px-1 py-1 space-y-2">
+                        <div className="relative group/input">
+                          <input
+                            type="password"
+                            placeholder={t(`onboarding.key.placeholder.${model.id}` as any)}
+                            value={apiKeys[model.id as keyof typeof apiKeys] || ''}
+                            onChange={(e) => {
+                              setApiKeys(prev => ({ ...prev, [model.id]: e.target.value }));
+                              setValidationStatuses(prev => ({ ...prev, [model.id]: null }));
+                            }}
+                            className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-2.5 pl-3 pr-10 text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none placeholder:text-on-surface-variant/30"
+                          />
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                            {validationStatuses[model.id] === 'valid' && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                            {validationStatuses[model.id] === 'invalid' && <XCircle className="w-4 h-4 text-error" />}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleVerify(model.id)}
+                            disabled={!apiKeys[model.id as keyof typeof apiKeys] || verifyingModel === model.id}
+                            className="w-full text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {verifyingModel === model.id ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                {t('onboarding.status.validating')}
+                              </>
+                            ) : (
+                              t('onboarding.button.start')
+                            )}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -91,7 +149,10 @@ export function SettingsScreen({
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setCandleColorStyle('red-up')}
+                  onClick={() => {
+                    setCandleColorStyle('red-up');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                     candleColorStyle === 'red-up' 
                       ? 'border-primary bg-primary/5' 
@@ -105,7 +166,10 @@ export function SettingsScreen({
                   <span className={`font-bold text-sm ${candleColorStyle === 'red-up' ? 'text-primary' : 'text-on-surface'}`}>{t('settings.candle.tw')}</span>
                 </button>
                 <button
-                  onClick={() => setCandleColorStyle('green-up')}
+                  onClick={() => {
+                    setCandleColorStyle('green-up');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
                     candleColorStyle === 'green-up' 
                       ? 'border-primary bg-primary/5' 
@@ -130,7 +194,10 @@ export function SettingsScreen({
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setLanguage('zh-TW')}
+                  onClick={() => {
+                    setLanguage('zh-TW');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex items-center justify-center p-4 rounded-xl border-2 transition-all ${
                     language === 'zh-TW' 
                       ? 'border-primary bg-primary/5 text-primary' 
@@ -140,7 +207,10 @@ export function SettingsScreen({
                   <span className="font-bold text-sm">{t('settings.search.lang.zh')}</span>
                 </button>
                 <button
-                  onClick={() => setLanguage('en-US')}
+                  onClick={() => {
+                    setLanguage('en-US');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex items-center justify-center p-4 rounded-xl border-2 transition-all ${
                     language === 'en-US' 
                       ? 'border-primary bg-primary/5 text-primary' 
@@ -161,7 +231,10 @@ export function SettingsScreen({
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => setTheme('light')}
+                  onClick={() => {
+                    setTheme('light');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl border-2 transition-all ${
                     theme === 'light' 
                       ? 'border-primary bg-primary/5 text-primary' 
@@ -172,7 +245,10 @@ export function SettingsScreen({
                   <span className="font-bold">{t('settings.theme.light')}</span>
                 </button>
                 <button
-                  onClick={() => setTheme('dark')}
+                  onClick={() => {
+                    setTheme('dark');
+                    onSuccess(t('common.toast.success.updated'));
+                  }}
                   className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl border-2 transition-all ${
                     theme === 'dark' 
                       ? 'border-primary bg-primary/5 text-primary' 
@@ -186,15 +262,36 @@ export function SettingsScreen({
             </div>
           </div>
 
-          <div className="bg-surface-container-low rounded-2xl p-5 flex items-center justify-between border border-outline-variant/10">
-            <div className="flex items-center gap-3">
-              <ShieldCheck className="w-5 h-5 text-secondary" />
-              <div>
-                <p className="text-sm font-bold text-on-surface">{t('settings.privacy.title')}</p>
-                <p className="text-xs text-on-surface-variant">{t('settings.privacy.desc')}</p>
-              </div>
+          <div className="mt-4 p-4 rounded-2xl bg-surface-container-low border border-outline-variant/10 flex items-start gap-4">
+            <ShieldCheck className="w-5 h-5 text-primary mt-1 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-bold text-sm text-on-surface">{t('settings.privacy.title')}</p>
+              <p className="text-xs text-on-surface-variant">{t('settings.privacy.desc')}</p>
             </div>
-            <Lock className="w-4 h-4 text-on-surface-variant/30" />
+          </div>
+
+          {/* Danger Zone */}
+          <div className="mt-12 pt-8 border-t border-error/20 space-y-6">
+            <div className="flex items-center gap-3 text-error">
+              <AlertTriangle className="w-5 h-5" />
+              <h3 className="font-headline font-bold uppercase tracking-wider text-sm">{t('settings.danger.title')}</h3>
+            </div>
+            
+            <div className="bg-error/5 border border-error/10 rounded-2xl p-6 space-y-4">
+              <p className="text-xs text-on-surface-variant leading-relaxed">
+                {t('settings.danger.reset.confirm')}
+              </p>
+              <button
+                onClick={() => {
+                  if (window.confirm(t('settings.danger.reset.confirm'))) {
+                    onFullReset();
+                  }
+                }}
+                className="w-full py-4 rounded-xl bg-error text-on-error font-bold text-sm hover:brightness-110 active:scale-[0.98] transition-all shadow-lg shadow-error/20"
+              >
+                {t('settings.danger.reset.button')}
+              </button>
+            </div>
           </div>
         </div>
       </main>

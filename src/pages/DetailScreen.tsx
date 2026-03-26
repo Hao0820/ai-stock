@@ -1,14 +1,35 @@
 import React, { useState, useEffect, useRef, useTransition, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, BarChart3, BrainCircuit, Clock, Target, Rocket, Globe, ShieldAlert, Loader2 } from 'lucide-react';
+import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, BarChart3, BrainCircuit, Clock, Target, Rocket, Globe, ShieldAlert, Loader2, Settings } from 'lucide-react';
 import { fetchStockDetail, StockDetailResult, ProcessedChartData } from '../api/yahoo';
+import { analyzeStock } from '../api/ai';
 import { useTranslation } from '../contexts/LanguageContext';
+import { getCachedStockData, setCachedStockData } from '../utils/cache';
 import { createChart, ColorType, CrosshairMode, LineStyle, IChartApi, Time, SeriesMarker } from 'lightweight-charts';
+import { AIAnalysis } from '../types';
 
 // --- Main Detail Screen ---
 type Resolution = 'D' | 'W' | 'M';
 
-export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'red-up' }: { stock: string, onBack: () => void, initialName?: string, candleColorStyle?: 'red-up' | 'green-up' }) {
+export function DetailScreen({ 
+  stock, 
+  onBack, 
+  onSettingsClick, 
+  initialName, 
+  candleColorStyle = 'red-up',
+  apiKeys,
+  selectedModel,
+  subModel
+}: { 
+  stock: string, 
+  onBack: () => void, 
+  onSettingsClick: () => void, 
+  initialName?: string, 
+  candleColorStyle?: 'red-up' | 'green-up',
+  apiKeys: { google: string, openai: string, claude: string },
+  selectedModel: string,
+  subModel: string
+}) {
   const { t, language } = useTranslation();
   const [aiTab, setAiTab] = useState<'short' | 'medium' | 'long'>('short');
   const [activeRes, setActiveRes] = useState<Resolution>('D'); 
@@ -34,18 +55,48 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
   const [tooltipData, setTooltipData] = useState<ProcessedChartData | null>(null);
   const [chartDebugError, setChartDebugError] = useState<string | null>(null);
 
+  // AI Analysis State
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   useEffect(() => {
     let isMounted = true;
     async function loadAllData() {
+      // Check cache first for each resolution
+      const cachedD = getCachedStockData(stock, '2y', '1d');
+      const cachedW = getCachedStockData(stock, '10y', '1wk');
+      const cachedM = getCachedStockData(stock, 'max', '1mo');
+
+      if (cachedD && cachedW && cachedM) {
+        if (isMounted) {
+          setDataStore({ D: cachedD, W: cachedW, M: cachedM });
+          setIsLoading(false);
+        }
+        return;
+      }
+
       setIsLoading(true);
-      const [resD, resW, resM] = await Promise.all([
-        fetchStockDetail(stock, '2y', '1d', language),
-        fetchStockDetail(stock, '10y', '1wk', language),
-        fetchStockDetail(stock, 'max', '1mo', language)
-      ]);
-      if (isMounted) {
-        setDataStore({ D: resD, W: resW, M: resM });
-        setIsLoading(false);
+      try {
+        const [resD, resW, resM] = await Promise.all([
+          fetchStockDetail(stock, '2y', '1d', language),
+          fetchStockDetail(stock, '10y', '1wk', language),
+          fetchStockDetail(stock, 'max', '1mo', language)
+        ]);
+
+        if (isMounted) {
+          setDataStore({ D: resD, W: resW, M: resM });
+          
+          // Save to cache
+          if (resD) setCachedStockData(stock, '2y', '1d', resD);
+          if (resW) setCachedStockData(stock, '10y', '1wk', resW);
+          if (resM) setCachedStockData(stock, 'max', '1mo', resM);
+          
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error('Data fetch error:', err);
+        if (isMounted) setIsLoading(false);
       }
     }
     loadAllData();
@@ -66,7 +117,44 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
 
   const dailyDetail = dataStore.D;
   const stockDetail = dataStore[activeRes];
-  
+
+  // AI triggering effect
+  useEffect(() => {
+    if (!dailyDetail || aiAnalysis || isAiLoading || aiError) return;
+    
+    const key = apiKeys[selectedModel as keyof typeof apiKeys];
+    if (!key) {
+        setAiError('Missing API Key in settings');
+        return;
+    }
+
+    async function runAnalysis() {
+        setIsAiLoading(true);
+        setAiError(null);
+        try {
+            // Get the latest data point indicators
+            const latest = dailyDetail!.chartData[dailyDetail!.chartData.length - 1];
+            const result = await analyzeStock(
+                stock,
+                dailyDetail!.name,
+                dailyDetail!.price,
+                dailyDetail!.changePercent,
+                latest,
+                key,
+                subModel,
+                language
+            );
+            setAiAnalysis(result);
+        } catch (err: any) {
+            setAiError(err.message || 'AI Analysis failed');
+        } finally {
+            setIsAiLoading(false);
+        }
+    }
+
+    runAnalysis();
+  }, [dailyDetail, apiKeys, selectedModel, subModel, stock, language]);
+
   // Use daily data for the main price display to satisfy "percentage shouldn't change with resolution"
   const displayPrice = dailyDetail?.price;
   const displayChange = dailyDetail?.changeValue;
@@ -164,8 +252,8 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
     mainChart.timeScale().fitContent();
     const lastIndex = uniqueData.length;
     mainChart.timeScale().setVisibleLogicalRange({
-      from: lastIndex - 80,
-      to: lastIndex + 5, // Small buffer at end
+      from: lastIndex - 30,
+      to: lastIndex + 2, // Small buffer at end
     });
 
     let isSyncing = false;
@@ -253,11 +341,17 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
           </button>
           <h1 className="font-headline font-bold tracking-tight text-xl text-primary">{dailyDetail ? dailyDetail.symbol : stock} </h1>
         </div>
+        <button 
+          onClick={onSettingsClick}
+          className="text-on-surface opacity-70 hover:bg-on-surface/5 p-2 rounded-xl transition-colors active:scale-95 duration-200"
+        >
+          <Settings className="w-6 h-6" />
+        </button>
       </nav>
 
       <main className="flex-grow pt-32 px-4 md:px-8 max-w-5xl mx-auto w-full relative">
         {isLoading && (
-          <div className="absolute inset-0 z-40 bg-surface/50 backdrop-blur-sm flex items-start justify-center pt-40 rounded-3xl">
+          <div className="absolute inset-0 z-40 bg-surface/50 backdrop-blur-sm flex items-center justify-center rounded-3xl">
             <Loader2 className="w-12 h-12 text-primary animate-spin" />
           </div>
         )}
@@ -266,7 +360,7 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
               <span className="font-label text-sm uppercase tracking-widest text-primary mb-1 block">
-                {initialName || dailyDetail?.name || t('common.loading')}
+                {(initialName && initialName !== stock ? initialName : dailyDetail?.name) || t('common.loading')}
               </span>
               <h2 className={`font-headline text-5xl font-extrabold tracking-tighter ${isUpColor} flex items-baseline gap-4`}>
                 {displayPrice?.toFixed(2) || '---.--'} 
@@ -298,7 +392,7 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
                   >
                     <div className="bg-surface-container-high px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 border border-outline-variant/20">
                       <Loader2 className="w-5 h-5 text-primary animate-spin" />
-                      <span className="font-bold text-sm tracking-wide text-on-surface">Rendering Canvas...</span>
+                      <span className="font-bold text-sm tracking-wide text-on-surface">{t('detail.loading.canvas')}</span>
                     </div>
                   </motion.div>
                 )}
@@ -306,7 +400,7 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
 
               {chartDebugError && (
                  <div className="absolute inset-x-0 top-0 z-50 bg-red-500/90 text-white p-4 text-xs font-mono whitespace-pre-wrap overflow-auto shadow-xl">
-                   <h3 className="font-bold mb-2 uppercase">Chart Render Error:</h3>
+                   <h3 className="font-bold mb-2 uppercase">{t('detail.error.chart')}</h3>
                    {chartDebugError}
                  </div>
               )}
@@ -405,81 +499,127 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
           {/* Sidebar */}
           <aside className="md:col-span-4 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
             {/* AI Recommendation */}
-            <div className="bg-primary/10 border border-primary/20 rounded-3xl p-8 shadow-xl relative overflow-hidden group">
-              <div className="absolute -right-4 -top-4 opacity-10 group-hover:scale-110 transition-transform duration-500">
-                <Sparkles className="w-24 h-24 text-primary" />
-              </div>
-              <div className="flex items-center justify-between mb-6 relative z-10">
-                <h3 className="font-headline text-lg font-bold text-on-surface">{t('ai.advice.title')}</h3>
-                <div className="px-3 py-1 rounded-full bg-primary text-on-primary text-[10px] font-bold uppercase tracking-widest">
-                  {t('ai.advice.buy')}
-                </div>
-              </div>
-              <div className="space-y-4 relative z-10">
-                <div className="flex justify-between items-end">
-                  <div>
-                    <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest mb-1">{t('ai.advice.confidence')}</p>
-                    <p className="text-3xl font-headline font-bold text-primary">92%</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest mb-1">{t('ai.advice.targetPrice')}</p>
-                    <p className="text-xl font-headline font-bold text-on-surface">NT$ 1,100</p>
+            <div className="bg-primary/10 border border-primary/20 rounded-3xl p-8 shadow-xl relative overflow-hidden group min-h-[220px]">
+              {isAiLoading ? (
+                <div className="flex flex-col h-full animate-pulse">
+                  <div className="w-1/2 h-6 bg-primary/20 rounded mb-6"></div>
+                  <div className="flex justify-between items-end mt-auto">
+                    <div className="space-y-2">
+                       <div className="w-16 h-4 bg-primary/10 rounded"></div>
+                       <div className="w-24 h-10 bg-primary/20 rounded"></div>
+                    </div>
+                    <div className="space-y-2 text-right">
+                       <div className="w-20 h-4 bg-primary/10 rounded ml-auto"></div>
+                       <div className="w-32 h-8 bg-on-surface/10 rounded ml-auto"></div>
+                    </div>
                   </div>
                 </div>
-                <div className="h-1.5 w-full bg-surface-container-lowest rounded-full overflow-hidden">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: '92%' }}
-                    transition={{ duration: 1.5, delay: 0.2 }}
-                    className="h-full bg-primary shadow-[0_0_15px_rgba(78,222,163,0.4)]"
-                  ></motion.div>
+              ) : aiError ? (
+                <div className="flex flex-col items-center justify-center h-full text-center space-y-3">
+                  <ShieldAlert className="w-8 h-8 text-error/60" />
+                  <p className="text-xs text-on-surface-variant">{t('common.error')}: {aiError}</p>
                 </div>
-              </div>
+              ) : aiAnalysis ? (
+                <>
+                  <div className="absolute -right-4 -top-4 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                    <Sparkles className="w-24 h-24 text-primary" />
+                  </div>
+                  <div className="flex items-center justify-between mb-6 relative z-10">
+                    <h3 className="font-headline text-lg font-bold text-on-surface">{t('ai.advice.title')}</h3>
+                    <div className={`px-3 py-1 rounded-full text-on-primary text-[10px] font-bold uppercase tracking-widest ${
+                      aiAnalysis.recommendation.toLowerCase().includes('sell') ? 'bg-error' : 'bg-primary'
+                    }`}>
+                      {aiAnalysis.recommendation}
+                    </div>
+                  </div>
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest mb-1">{t('ai.advice.confidence')}</p>
+                        <p className="text-3xl font-headline font-bold text-primary">{aiAnalysis.confidence}%</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest mb-1">{t('ai.advice.targetPrice')}</p>
+                        <p className="text-xl font-headline font-bold text-on-surface">{aiAnalysis.targetPrice}</p>
+                      </div>
+                    </div>
+                    <div className="h-1.5 w-full bg-surface-container-lowest rounded-full overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${aiAnalysis.confidence}%` }}
+                        transition={{ duration: 1.5, delay: 0.2 }}
+                        className="h-full bg-primary shadow-[0_0_15px_rgba(78,222,163,0.4)]"
+                      ></motion.div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             {/* News Sentiment */}
-            <div className="bg-surface-container rounded-3xl p-8 shadow-xl relative overflow-hidden border border-outline-variant/10">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="font-headline text-lg font-bold text-on-surface">{t('news.sentiment.title')}</h3>
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary">
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">{t('news.sentiment.bullish')}</span>
+            <div className="bg-surface-container rounded-3xl p-8 shadow-xl relative overflow-hidden border border-outline-variant/10 min-h-[280px]">
+              {isAiLoading ? (
+                <div className="animate-pulse space-y-6">
+                  <div className="flex justify-between">
+                    <div className="w-1/3 h-5 bg-on-surface/10 rounded"></div>
+                    <div className="w-1/4 h-5 bg-primary/10 rounded-full"></div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="w-full h-2 bg-on-surface/5 rounded"></div>
+                    <div className="w-full h-8 bg-on-surface/10 rounded-xl"></div>
+                  </div>
                 </div>
-              </div>
+              ) : aiAnalysis ? (
+                <>
+                  <div className="flex items-center justify-between mb-8">
+                    <h3 className="font-headline text-lg font-bold text-on-surface">{t('news.sentiment.title')}</h3>
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary">
+                      {aiAnalysis.sentiment.positive > aiAnalysis.sentiment.negative ? (
+                        <TrendingUp className="w-4 h-4" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4 text-error" />
+                      )}
+                      <span className="text-[10px] font-bold uppercase tracking-widest">
+                        {aiAnalysis.sentiment.positive > 0.6 ? t('news.sentiment.bullish') : aiAnalysis.sentiment.negative > 0.6 ? t('news.sentiment.bearish') : t('history.sentiment.neutral')}
+                      </span>
+                    </div>
+                  </div>
 
-              <div className="space-y-6">
-                <div className="space-y-3">
-                  <div className="flex justify-between text-xs font-label">
-                    <span className="text-primary font-bold uppercase tracking-tighter">{t('news.sentiment.positive')}</span>
-                    <span className="text-on-surface font-bold">72%</span>
+                  <div className="space-y-6">
+                    <div className="space-y-3">
+                      <div className="flex justify-between text-xs font-label">
+                        <span className="text-primary font-bold uppercase tracking-tighter">{t('news.sentiment.positive')}</span>
+                        <span className="text-on-surface font-bold">{Math.round(aiAnalysis.sentiment.positive * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-surface-container-lowest rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${aiAnalysis.sentiment.positive * 100}%` }}
+                          transition={{ duration: 1, delay: 0.5 }}
+                          className="h-full bg-primary shadow-[0_0_10px_rgba(78,222,163,0.5)]"
+                        ></motion.div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-outline-variant/10">
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest">{t('news.sentiment.neutral')}</p>
+                        <p className="text-lg font-headline font-bold text-on-surface">{Math.round(aiAnalysis.sentiment.neutral * 100)}%</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-error uppercase font-bold tracking-widest">{t('news.sentiment.negative')}</p>
+                        <p className="text-lg font-headline font-bold text-on-surface">{Math.round(aiAnalysis.sentiment.negative * 100)}%</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="h-2 w-full bg-surface-container-lowest rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: '72%' }}
-                      transition={{ duration: 1, delay: 0.5 }}
-                      className="h-full bg-primary shadow-[0_0_10px_rgba(78,222,163,0.5)]"
-                    ></motion.div>
+                  
+                  <div className="mt-8 p-4 rounded-2xl bg-surface-container-low border border-outline-variant/5">
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed italic">
+                      "{aiAnalysis.summary}"
+                    </p>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-outline-variant/10">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest">{t('news.sentiment.neutral')}</p>
-                    <p className="text-lg font-headline font-bold text-on-surface">20%</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-error uppercase font-bold tracking-widest">{t('news.sentiment.negative')}</p>
-                    <p className="text-lg font-headline font-bold text-on-surface">8%</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mt-8 p-4 rounded-2xl bg-surface-container-low border border-outline-variant/5">
-                <p className="text-[11px] text-on-surface-variant leading-relaxed italic">
-                  {t('news.sentiment.quote')}
-                </p>
-              </div>
+                </>
+              ) : null}
             </div>
           </aside>
 
@@ -518,53 +658,64 @@ export function DetailScreen({ stock, onBack, initialName, candleColorStyle = 'r
               </div>
             </div>
 
-            <div className="flex-grow">
+            <div className="flex-grow min-h-[300px]">
               <AnimatePresence mode="wait">
-                <motion.div
-                  key={aiTab}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-                >
-                  {aiTab === 'short' && (
-                    <div className="space-y-5">
-                      <div className="p-5 rounded-2xl bg-primary/5 border-l-4 border-primary">
-                        <h4 className="font-bold text-primary mb-2 flex items-center gap-2">
-                          <TrendingUp className="w-4 h-4" /> {t('ai.multi.short.title')}
-                        </h4>
-                        <p className="text-sm text-on-surface-variant leading-relaxed">
-                          {t('ai.multi.short.desc')}
-                        </p>
+                {isAiLoading ? (
+                   <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="space-y-4 animate-pulse pt-4"
+                   >
+                     <div className="h-32 w-full bg-on-surface/5 rounded-3xl"></div>
+                     <div className="h-4 w-3/4 bg-on-surface/5 rounded ml-2"></div>
+                     <div className="h-4 w-1/2 bg-on-surface/5 rounded ml-2"></div>
+                   </motion.div>
+                ) : aiAnalysis ? (
+                  <motion.div
+                    key={aiTab}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-6"
+                  >
+                    {aiTab === 'short' && (
+                      <div className="space-y-5">
+                        <div className="p-6 rounded-2xl bg-primary/5 border-l-4 border-primary">
+                          <h4 className="font-bold text-primary mb-3 flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4" /> {t('ai.multi.short.title')}
+                          </h4>
+                          <p className="text-sm text-on-surface-variant leading-relaxed">
+                            {aiAnalysis.shortTerm}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {aiTab === 'medium' && (
-                    <div className="space-y-5">
-                      <div className="p-5 rounded-2xl bg-secondary/5 border-l-4 border-secondary">
-                        <h4 className="font-bold text-secondary mb-2 flex items-center gap-2">
-                          <Target className="w-4 h-4" /> {t('ai.multi.medium.title')}
-                        </h4>
-                        <p className="text-sm text-on-surface-variant leading-relaxed">
-                          {t('ai.multi.medium.desc')}
-                        </p>
+                    )}
+                    {aiTab === 'medium' && (
+                      <div className="space-y-5">
+                        <div className="p-6 rounded-2xl bg-secondary/5 border-l-4 border-secondary">
+                          <h4 className="font-bold text-secondary mb-3 flex items-center gap-2">
+                            <Target className="w-4 h-4" /> {t('ai.multi.medium.title')}
+                          </h4>
+                          <p className="text-sm text-on-surface-variant leading-relaxed">
+                            {aiAnalysis.mediumTerm}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {aiTab === 'long' && (
-                    <div className="space-y-5">
-                      <div className="p-5 rounded-2xl bg-tertiary/5 border-l-4 border-tertiary">
-                        <h4 className="font-bold text-tertiary mb-2 flex items-center gap-2">
-                          <Rocket className="w-4 h-4" /> {t('ai.multi.long.title')}
-                        </h4>
-                        <p className="text-sm text-on-surface-variant leading-relaxed">
-                          {t('ai.multi.long.desc')}
-                        </p>
+                    )}
+                    {aiTab === 'long' && (
+                      <div className="space-y-5">
+                        <div className="p-6 rounded-2xl bg-tertiary/5 border-l-4 border-tertiary">
+                          <h4 className="font-bold text-tertiary mb-3 flex items-center gap-2">
+                            <Rocket className="w-4 h-4" /> {t('ai.multi.long.title')}
+                          </h4>
+                          <p className="text-sm text-on-surface-variant leading-relaxed">
+                            {aiAnalysis.longTerm}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </motion.div>
+                    )}
+                  </motion.div>
+                ) : null}
               </AnimatePresence>
             </div>
           </section>

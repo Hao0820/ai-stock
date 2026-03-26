@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Settings, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { ScreenState, TabState } from './types';
 import { TopNav } from './components/TopNav';
 import { BottomNav } from './components/BottomNav';
@@ -9,11 +10,28 @@ import { OnboardingScreen } from './pages/OnboardingScreen';
 import { SettingsScreen } from './pages/SettingsScreen';
 import { DetailScreen } from './pages/DetailScreen';
 import { useTranslation } from './contexts/LanguageContext';
+import { useHistory } from './hooks/useHistory';
+import { clearAllStockCache } from './utils/cache';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<ScreenState>('onboarding');
+  const initialScreen = (() => {
+    try {
+      const saved = localStorage.getItem('ai-stock-keys');
+      if (saved) {
+        const keys = JSON.parse(saved);
+        if (keys.google || keys.openai || keys.claude) {
+          return 'main';
+        }
+      }
+    } catch { }
+    return 'onboarding';
+  })();
+
+  const [currentScreen, setCurrentScreen] = useState<ScreenState>(initialScreen);
+  const [lastParentScreen, setLastParentScreen] = useState<ScreenState>(initialScreen);
   const [activeTab, setActiveTab] = useState<TabState>('analysis');
   const [selectedStock, setSelectedStock] = useState<{ symbol: string, name: string } | null>(null);
+  const [activeSubModel, setActiveSubModel] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [selectedModel, setSelectedModel] = useState('google');
   const [apiKeys, setApiKeys] = useState<{ google: string, openai: string, claude: string }>(() => {
@@ -24,12 +42,35 @@ export default function App() {
       return { google: '', openai: '', claude: '' };
     }
   });
+
+  // Dynamic available models state
+  const [availableModels, setAvailableModels] = useState<Record<string, { id: string, name: string }[]>>(() => {
+    try {
+      const saved = localStorage.getItem('ai-stock-models');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
   const [candleColorStyle, setCandleColorStyle] = useState<'red-up' | 'green-up'>('red-up');
-  const { language, setLanguage } = useTranslation();
+  const { t, language, setLanguage } = useTranslation();
+  const { history, addHistory, clearHistory } = useHistory();
+
+  // Toast State
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     localStorage.setItem('ai-stock-keys', JSON.stringify(apiKeys));
   }, [apiKeys]);
+
+  useEffect(() => {
+    localStorage.setItem('ai-stock-models', JSON.stringify(availableModels));
+  }, [availableModels]);
 
   useEffect(() => {
     if (theme === 'light') {
@@ -41,19 +82,42 @@ export default function App() {
 
   const handleStartAnalysis = () => {
     setCurrentScreen('main');
+    setLastParentScreen('main');
   };
 
-  const handleViewDetail = (symbol: string, name: string) => {
+  const handleViewDetail = (symbol: string, name: string, model?: string) => {
     setSelectedStock({ symbol, name });
+    if (model) setActiveSubModel(model);
+    setLastParentScreen('main');
     setCurrentScreen('detail');
+    addHistory({ symbol, name });
   };
 
   const handleOpenSettings = () => {
+    setLastParentScreen(currentScreen);
     setCurrentScreen('settings');
   };
 
+  const handleFullReset = () => {
+    // Clear state
+    setApiKeys({ google: '', openai: '', claude: '' });
+    setAvailableModels({});
+    setTheme('dark');
+    setLanguage('zh-TW');
+    setCandleColorStyle('red-up');
+    
+    // Clear localStorage
+    localStorage.removeItem('ai-stock-keys');
+    localStorage.removeItem('ai-stock-models');
+    clearHistory();
+    clearAllStockCache();
+    
+    showToast(t('common.toast.success.updated'), 'success');
+    setCurrentScreen('onboarding');
+  };
+
   const handleBack = () => {
-    setCurrentScreen('main');
+    setCurrentScreen(lastParentScreen);
     setSelectedStock(null);
   };
 
@@ -65,15 +129,18 @@ export default function App() {
             key="onboarding"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.4 }}
+            exit={{ opacity: 0 }}
+            className="w-full"
           >
-            <OnboardingScreen 
-              onStart={handleStartAnalysis} 
+            <OnboardingScreen
+              onStart={handleStartAnalysis}
+              onSettingsClick={handleOpenSettings}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
               apiKeys={apiKeys}
               setApiKeys={setApiKeys}
+              onSuccess={(msg) => showToast(msg, 'success')}
+              setAvailableModels={setAvailableModels}
             />
           </motion.div>
         )}
@@ -91,13 +158,14 @@ export default function App() {
             <main className="flex-grow flex flex-col items-center px-6 max-w-lg mx-auto w-full pt-36 pb-[22vh]">
               <div className="my-auto w-full flex flex-col items-center">
                 {activeTab === 'analysis' ? (
-                  <AnalysisTab 
-                    onAnalyze={handleViewDetail} 
+                  <AnalysisTab
+                    onAnalyze={handleViewDetail}
                     selectedModel={selectedModel}
                     language={language}
+                    availableModels={availableModels[selectedModel] || []}
                   />
                 ) : (
-                  <HistoryTab onViewDetail={handleViewDetail} />
+                  <HistoryTab onViewDetail={handleViewDetail} history={history} onClear={clearHistory} />
                 )}
               </div>
             </main>
@@ -108,23 +176,26 @@ export default function App() {
         {currentScreen === 'settings' && (
           <motion.div
             key="settings"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <SettingsScreen 
+            <SettingsScreen
               onBack={handleBack}
-              theme={theme} 
-              setTheme={setTheme} 
-              selectedModel={selectedModel} 
-              setSelectedModel={setSelectedModel} 
+              theme={theme}
+              setTheme={setTheme}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
               apiKeys={apiKeys}
               setApiKeys={setApiKeys}
               candleColorStyle={candleColorStyle}
               setCandleColorStyle={setCandleColorStyle}
-              language={language}
-              setLanguage={setLanguage}
+              language={language as any}
+              setLanguage={setLanguage as any}
+              onSuccess={(msg) => showToast(msg, 'success')}
+              setAvailableModels={setAvailableModels}
+              onFullReset={handleFullReset}
             />
           </motion.div>
         )}
@@ -137,12 +208,47 @@ export default function App() {
             exit={{ opacity: 0, x: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <DetailScreen 
-              stock={selectedStock?.symbol || '2330.TW'} 
+            <DetailScreen
+              stock={selectedStock?.symbol || '2330.TW'}
               initialName={selectedStock?.name}
-              onBack={handleBack} 
+              onBack={handleBack}
+              onSettingsClick={handleOpenSettings}
               candleColorStyle={candleColorStyle}
+              apiKeys={apiKeys}
+              selectedModel={selectedModel}
+              subModel={activeSubModel}
             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, x: '-50%' }}
+            animate={{ opacity: 1, y: 20, x: '-50%' }}
+            exit={{ opacity: 0, y: -50, x: '-50%' }}
+            className="fixed top-0 left-1/2 z-[9999] w-full max-w-sm px-4"
+          >
+            <div className="bg-surface-container-high/80 backdrop-blur-xl border border-outline-variant/20 rounded-2xl p-4 shadow-2xl flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                toast.type === 'success' ? 'bg-primary/20 text-primary' : 
+                toast.type === 'error' ? 'bg-error/20 text-error' : 'bg-secondary/20 text-secondary'
+              }`}>
+                {toast.type === 'success' && <CheckCircle2 className="w-5 h-5" />}
+                {toast.type === 'error' && <AlertCircle className="w-5 h-5" />}
+                {toast.type === 'info' && <Info className="w-5 h-5" />}
+              </div>
+              <div className="flex-grow overflow-hidden">
+                <p className="text-sm font-bold text-on-surface truncate">{toast.message}</p>
+              </div>
+              <button 
+                onClick={() => setToast(null)}
+                className="p-1 hover:bg-on-surface/5 rounded-lg text-on-surface-variant transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

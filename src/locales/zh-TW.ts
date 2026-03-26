@@ -3,16 +3,28 @@ export const zhTW = {
   'common.loading': '載入中...',
   'common.error': '錯誤',
   'common.back': '返回',
+  'common.reset': '全部重置',
+  'common.copyright': '© 2026 AI STOCK. 版權所有。',
+  'common.toast.success.paired': 'AI 供應商配對成功',
+  'common.toast.success.updated': '系統設定已更新',
+  'common.toast.success.unpaired': '已成功解除配對',
+  'common.toast.error.invalidKey': '金鑰驗證失敗：{0}',
+  'common.toast.error.genericKey': '無法驗證金鑰，請再試一次',
 
   // Onboarding
-  'onboarding.title': '未來已來',
+  'onboarding.title': '股票分析',
   'onboarding.subtitle': '下一世代的專業 AI',
-  'onboarding.description': '搭載自行搭建的 Neural Engine，即時深度分析全球交易市場與多維度技術指標。',
-  'onboarding.button.start': '設定已完成',
+  'onboarding.description': '最強大的 AI 投資分析工具，支援多種 AI 模型與全球市場數據。',
+  'onboarding.status.validating': '正在驗證金鑰...',
+  'onboarding.model.label': '選擇 AI 供應商',
+  'onboarding.button.start': '配對',
   'onboarding.key.label': 'API 金鑰配置',
   'onboarding.key.placeholder.google': '請輸入您的 Gemini API 金鑰',
   'onboarding.key.placeholder.openai': '請輸入您的 OpenAI API 金鑰 (sk-...)',
   'onboarding.key.placeholder.claude': '請輸入您的 Claude API 金鑰 (sk-ant-...)',
+  'onboarding.feature.secure': '資訊安全 TLS 1.3',
+  'onboarding.feature.realtime': '即時行情分析',
+  'onboarding.feature.global': '全球市場數據',
   'onboarding.beta.message': 'BETA 封測版 - 僅供邀請用戶',
 
   // Nav
@@ -28,11 +40,17 @@ export const zhTW = {
   'analysis.error.notFound': '找不到 "{0}" 相關的股票，請確認代碼是否正確。',
   'analysis.button.searching': '搜尋中...',
   'analysis.button.start': '開始分析',
+  'analysis.model.provider': '{0} 供應商',
 
   // History Tab
   'history.title': '近期分析紀錄',
+  'history.subtitle': '自動化分析軌跡與歷史行情預測',
   'history.empty.title': '未找到任何分析軌跡',
   'history.empty.desc': '您的每一次分析與預測都將安全地加密儲存於此。目前尚未有任何紀錄，請至「智能分析」頁面開啟您的第一筆交易研究。',
+  'history.sentiment.bullish': '看漲',
+  'history.sentiment.bearish': '看跌',
+  'history.sentiment.neutral': '中立',
+  'history.sentiment.correction': '修正',
 
   // Settings
   'settings.title': '系統設定',
@@ -54,11 +72,16 @@ export const zhTW = {
   'settings.theme.title': '介面主題',
   'settings.theme.light': '淺色模式',
   'settings.theme.dark': '深色模式',
+  'settings.danger.title': '危險區域',
+  'settings.danger.reset.button': '重置所有設定',
+  'settings.danger.reset.confirm': '確定要重置所有設定嗎？這會清除所有 API 金鑰、搜尋歷史紀錄並恢復預設介面。',
   'settings.privacy.title': '隱私保護已開啟',
   'settings.privacy.desc': '您的分析數據僅存儲於本地',
 
   // Detail Screen
   'detail.marketData': '市場數據',
+  'detail.loading.canvas': '正在繪製畫布...',
+  'detail.error.chart': '圖表渲染錯誤：',
   'detail.indicators': '技術指標',
   'detail.res.day': '日',
   'detail.res.week': '週',

@@ -1,24 +1,38 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Activity, ChevronDown, Key, ShieldCheck, Zap, Lock, Sparkles, Globe } from 'lucide-react';
+import { Activity, ChevronDown, Key, ShieldCheck, Zap, Lock, Sparkles, Globe, Settings, Loader2 } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
+import { validateApiKey, fetchAvailableModels } from '../api/ai';
 
 export function OnboardingScreen({ 
   onStart, 
+  onSettingsClick,
   selectedModel, 
   setSelectedModel, 
   apiKeys, 
-  setApiKeys 
+  setApiKeys,
+  onSuccess,
+  setAvailableModels
 }: { 
   onStart: () => void, 
+  onSettingsClick: () => void,
   selectedModel: string, 
   setSelectedModel: (m: string) => void,
   apiKeys: { google: string, openai: string, claude: string },
-  setApiKeys: React.Dispatch<React.SetStateAction<{ google: string, openai: string, claude: string }>>
+  setApiKeys: React.Dispatch<React.SetStateAction<{ google: string, openai: string, claude: string }>>,
+  onSuccess: (msg: string) => void,
+  setAvailableModels: React.Dispatch<React.SetStateAction<Record<string, { id: string, name: string }[]>>>
 }) {
   const { t } = useTranslation();
+  const [isValidating, setIsValidating] = React.useState(false);
   return (
     <div className="min-h-screen flex flex-col relative">
+      <button 
+        onClick={onSettingsClick}
+        className="absolute top-6 right-6 z-50 p-3 rounded-2xl bg-surface-container/50 backdrop-blur-md border border-outline-variant/20 hover:bg-surface-container hover:scale-105 active:scale-95 transition-all shadow-lg text-on-surface-variant hover:text-primary group"
+      >
+        <Settings className="w-5 h-5 group-hover:rotate-90 transition-transform duration-500" />
+      </button>
       {/* Background Glow Effects */}
       <div className="fixed inset-0 bg-glow-radial pointer-events-none"></div>
       <div className="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/5 blur-[120px] rounded-full pointer-events-none"></div>
@@ -56,7 +70,7 @@ export function OnboardingScreen({
               <form className="space-y-8" onSubmit={(e) => { e.preventDefault(); onStart(); }}>
                 <div className="text-left">
                   <label className="block text-xs font-semibold text-primary/70 mb-3 px-1 uppercase tracking-widest">
-                    Select AI Model
+                    {t('onboarding.model.label')}
                   </label>
                   <div className="relative group">
                     <select 
@@ -97,11 +111,38 @@ export function OnboardingScreen({
                 </div>
 
                 <button
-                  type="submit"
-                  className="w-full py-4 bg-gradient-to-r from-primary to-primary-container text-on-primary font-bold rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 flex items-center justify-center gap-2 group overflow-hidden relative px-6"
-                >
+              onClick={async () => {
+                setIsValidating(true);
+                try {
+                  const key = apiKeys[selectedModel as keyof typeof apiKeys];
+                  await validateApiKey(key);
+                  
+                  // Fetch models and update state
+                  const models = await fetchAvailableModels(key);
+                  setAvailableModels(prev => ({ ...prev, [selectedModel]: models }));
+                  
+                  onStart();
+                  onSuccess(t('common.toast.success.paired'));
+                } catch (err: any) {
+                  onSuccess(t('common.toast.error.invalidKey', err.message));
+                } finally {
+                  setIsValidating(false);
+                }
+              }}
+              disabled={!apiKeys[selectedModel as keyof typeof apiKeys] || isValidating}
+              className="w-full bg-primary text-on-primary font-headline font-bold py-4 rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/40 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 transition-all disabled:opacity-50 disabled:grayscale disabled:pointer-events-none flex items-center justify-center gap-2 group overflow-hidden relative px-6"
+            >
+              {isValidating ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="relative z-10 text-sm uppercase tracking-[0.2em]">{t('onboarding.status.validating')}</span>
+                </>
+              ) : (
+                <>
                   <span className="relative z-10 text-sm uppercase tracking-[0.2em]">{t('onboarding.button.start')}</span>
                   <Zap className="w-5 h-5 relative z-10 group-hover:translate-x-1 transition-transform shrink-0" />
+                </>
+              )}
                 </button>
               </form>
             </div>
@@ -115,15 +156,15 @@ export function OnboardingScreen({
           >
             <div className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-surface-container-high/30 transition-colors">
               <Lock className="w-6 h-6 text-secondary fill-secondary/20" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">Secure TLS 1.3</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">{t('onboarding.feature.secure')}</span>
             </div>
             <div className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-surface-container-high/30 transition-colors">
               <Sparkles className="w-6 h-6 text-primary fill-primary/20" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">Real-time Analysis</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">{t('onboarding.feature.realtime')}</span>
             </div>
             <div className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-surface-container-high/30 transition-colors">
               <Globe className="w-6 h-6 text-on-surface-variant fill-on-surface-variant/20" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">Global Data</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface">{t('onboarding.feature.global')}</span>
             </div>
           </motion.div>
         </div>
@@ -131,7 +172,7 @@ export function OnboardingScreen({
 
       <footer className="p-8 text-center border-t border-outline-variant/10 relative z-10">
         <p className="text-on-surface-variant/40 text-[10px] font-bold tracking-[0.3em] uppercase">
-          © 2026 AI STOCK. ALL RIGHTS RESERVED.
+          {t('common.copyright')}
         </p>
       </footer>
     </div>

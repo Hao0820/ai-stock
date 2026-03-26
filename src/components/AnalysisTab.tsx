@@ -1,19 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Cpu, Search, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Cpu, Search, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
 import { searchStock, searchStockSuggestions, StockSuggestion } from '../api/yahoo';
 import { useTranslation } from '../contexts/LanguageContext';
 
-export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze: (symbol: string, name: string) => void, selectedModel: string, language: 'zh-TW' | 'en-US' }) {
+export function AnalysisTab({ onAnalyze, selectedModel, language, availableModels }: { 
+  onAnalyze: (symbol: string, name: string, model: string) => void, 
+  selectedModel: string, 
+  language: 'zh-TW' | 'en-US',
+  availableModels: { id: string, name: string }[] 
+}) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
+  
+  const [subModel, setSubModel] = useState(availableModels[0]?.id || '');
+
+  useEffect(() => {
+    if (availableModels.length > 0) {
+      // Try to find a sensible default or just use the first one
+      setSubModel(availableModels[0].id);
+    } else {
+      setSubModel('');
+    }
+  }, [availableModels]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Autocomplete state
   const [suggestions, setSuggestions] = useState<StockSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Debounced search for suggestions
@@ -34,29 +51,29 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
 
   const handleSubmit = async (e?: React.FormEvent, customSymbol?: string, customName?: string) => {
     if (e) e.preventDefault();
-    
+
     // Use either the directly passed symbol (from dropdown) or the current input query
     const targetQuery = customSymbol || query;
-    
+
     if (!targetQuery.trim()) {
       setError(t('analysis.error.empty'));
       return;
     }
-    
+
     // Optimistic state updates
     if (customSymbol) setQuery(customSymbol);
     setError(null);
     setIsLoading(true);
     setShowSuggestions(false);
-    
+
     // Call Yahoo API to check stock existence
     const symbol = await searchStock(targetQuery.trim(), language);
-    
+
     if (symbol) {
       // Find successfully, transition to details
       // Use the name from suggestions if available, otherwise use symbol as fallback
-      onAnalyze(symbol, customName || symbol);
-      setIsLoading(false); 
+      onAnalyze(symbol, selectedName || customName || symbol, subModel);
+      setIsLoading(false);
     } else {
       setError(t('analysis.error.notFound', targetQuery));
       setIsLoading(false);
@@ -64,8 +81,10 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
   };
 
   const handleSelectSuggestion = (suggestion: StockSuggestion) => {
-    // Automatically submit chart analysis when a dropdown item is selected
-    handleSubmit(undefined, suggestion.symbol, suggestion.shortname);
+    // Fill the input field but do NOT submit automatically
+    setQuery(suggestion.symbol);
+    setSelectedName(suggestion.shortname);
+    setShowSuggestions(false);
   };
 
   return (
@@ -81,10 +100,26 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
           <div className="space-y-3 text-left">
             <label className="font-label text-xs font-bold uppercase tracking-widest text-primary ml-1">{t('analysis.layer')}</label>
             <div className="relative group">
-              <div className="w-full bg-surface-container-lowest border-none rounded-xl py-4 px-5 text-on-surface font-body flex items-center justify-between">
-                <span>{selectedModel === 'pulse-v2' ? 'Pulse Engine v2.4' : selectedModel === 'neural-alpha' ? 'Neural Alpha' : 'QuantMax-7B'}</span>
-                <Cpu className="w-4 h-4 opacity-40" />
+              <select 
+                value={subModel}
+                onChange={(e) => setSubModel(e.target.value)}
+                className="w-full bg-surface-container-lowest border-none rounded-xl py-4 pl-5 pr-14 text-on-surface font-body appearance-none cursor-pointer outline-none focus:ring-1 focus:ring-primary/40 truncate"
+              >
+                {availableModels.length > 0 ? (
+                  availableModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))
+                ) : (
+                  <option value="">{t('onboarding.model.label')}</option>
+                )}
+              </select>
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-40 flex items-center gap-2 text-on-surface group-focus-within:opacity-80 transition-opacity">
+                <Cpu className="w-4 h-4" />
+                <ChevronDown className="w-4 h-4" />
               </div>
+            </div>
+            <div className="text-[10px] text-on-surface-variant/50 ml-2 mt-1 uppercase tracking-widest font-bold">
+              {selectedModel === 'google' ? t('analysis.model.provider', 'Google') : selectedModel === 'openai' ? t('analysis.model.provider', 'OpenAI') : selectedModel === 'claude' ? t('analysis.model.provider', 'Anthropic') : ''}
             </div>
           </div>
 
@@ -96,18 +131,18 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
                 type="text"
                 placeholder={t('analysis.input.placeholder')}
                 value={query}
-                onFocus={() => { if(query.length >= 1) setShowSuggestions(true); }}
+                onFocus={() => { if (query.length >= 1) setShowSuggestions(true); }}
                 // We use setTimeout for onBlur to ensure onMouseDown from dropdown fires first
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 onChange={(e) => {
                   setQuery(e.target.value);
+                  setSelectedName(null); // Clear manual selection when typing
                   setShowSuggestions(true);
                   if (error) setError(null);
                 }}
                 disabled={isLoading}
-                className={`w-full bg-surface-container-lowest border rounded-xl py-4 px-5 text-on-surface font-body placeholder:text-on-surface-variant/30 focus:ring-1 focus:outline-none transition-all outline-none ${
-                  error ? 'border-error/50 focus:ring-error/40 focus:border-error/40' : 'border-transparent focus:ring-secondary/40'
-                }`}
+                className={`w-full bg-surface-container-lowest border rounded-xl py-4 px-5 text-on-surface font-body placeholder:text-on-surface-variant/30 focus:ring-1 focus:outline-none transition-all outline-none ${error ? 'border-error/50 focus:ring-error/40 focus:border-error/40' : 'border-transparent focus:ring-secondary/40'
+                  }`}
               />
               <div className="absolute right-4 top-1/2 -translate-y-1/2">
                 {isSearchingSuggestions ? (
@@ -120,18 +155,18 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
               {/* Autocomplete Dropdown */}
               <AnimatePresence>
                 {showSuggestions && suggestions.length > 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: -5, scale: 0.98 }} 
-                    animate={{ opacity: 1, y: 0, scale: 1 }} 
+                  <motion.div
+                    initial={{ opacity: 0, y: -5, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -5, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
                     className="absolute top-full left-0 right-0 mt-2 bg-surface-container border border-outline-variant/10 rounded-xl shadow-2xl z-[100] overflow-hidden drop-shadow-2xl"
                   >
                     {suggestions.map((s, i) => (
-                      <div 
+                      <div
                         key={i}
                         className="w-full text-left px-5 py-3.5 hover:bg-surface-container-high border-b border-outline-variant/5 last:border-0 flex justify-between items-center transition-colors cursor-pointer group"
-                        onMouseDown={() => handleSelectSuggestion(s)} 
+                        onMouseDown={() => handleSelectSuggestion(s)}
                       >
                         <div className="flex flex-col">
                           <span className="font-bold text-primary group-hover:text-primary-container transition-colors tracking-wide">{s.symbol}</span>
@@ -147,12 +182,12 @@ export function AnalysisTab({ onAnalyze, selectedModel, language }: { onAnalyze:
               </AnimatePresence>
 
             </div>
-            
+
             <AnimatePresence>
               {error && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -5, height: 0 }} 
-                  animate={{ opacity: 1, y: 0, height: 'auto' }} 
+                <motion.div
+                  initial={{ opacity: 0, y: -5, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
                   exit={{ opacity: 0, y: -5, height: 0 }}
                   className="flex items-center gap-1.5 text-error mt-2 ml-1"
                 >
