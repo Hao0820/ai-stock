@@ -1,190 +1,225 @@
 import { AIAnalysis } from '../types';
+import { GoogleGenAI } from '@google/genai';
 
 /**
- * AI API for integrating with Google Gemini
+ * Call AI models (Google/OpenAI/Groq compatible)
+ */
+async function callAi(prompt: string, apiKey: string, model: string): Promise<string> {
+  const isGoogle = model.includes('gemini');
+  
+  if (isGoogle) {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({ 
+      model,
+      contents: prompt,
+      config: {
+        temperature: 0.7,
+        topP: 0.8,
+        topK: 40,
+        maxOutputTokens: 2048,
+      }
+    });
+    return response.text || '';
+  } else {
+    // OpenAI or other standard API
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7
+      })
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error?.message || 'AI Request failed');
+    }
+    
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '';
+  }
+}
+
+/**
+ * Extracts JSON from potential markdown code blocks
+ */
+function extractJson(text: string): string {
+  const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/{[\s\S]*}/);
+  return jsonMatch ? jsonMatch[1] || jsonMatch[0] : text;
+}
+
+/**
+ * Robustly removes common markdown syntax like # and **
+ */
+export function stripMarkdown(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/#+\s*/g, '')           // Headers
+    .replace(/\*\*|__/g, '')         // Bold/Italic symbols
+    .replace(/^\s*[\*\-+]\s+/gm, '') // Bullet point markers at start of lines
+    .replace(/\s\*\s/g, ' ')         // Floating asterisks
+    .trim();
+}
+
+/**
+ * Single-pass master analysis
  */
 export async function analyzeStock(
-  symbol: string, 
-  name: string, 
+  symbol: string,
+  name: string,
   price: number,
   changePercent: number,
   indicators: any,
   apiKey: string,
-  model: string = 'gemini-1.5-pro',
-  language: 'zh-TW' | 'en-US' = 'zh-TW'
+  modelId: string = 'gemini-2.0-flash',
+  language: string = 'zh-TW'
 ): Promise<AIAnalysis> {
-  if (!apiKey) throw new Error('Missing AI API Key');
+  const isZh = language === 'zh-TW';
 
-  // Map human-readable UI names to technical API Model IDs
-  let apiModel = model.toLowerCase().replace(/\s+/g, '-');
-  if (apiModel.includes('gemini-1.5-pro')) apiModel = 'gemini-1.5-pro';
-  if (apiModel.includes('gemini-1.5-flash')) apiModel = 'gemini-1.5-flash';
-  if (apiModel.includes('gemini-1.0-pro')) apiModel = 'gemini-1.0-pro';
+  const prompt = `You are a Master Stock Strategist. Perform a deep, multi-dimensional analysis for ${name} (${symbol}) @ $${price} (${changePercent}%).
+
+TECHNICAL CONTEXT:
+${JSON.stringify(indicators)}
+
+TASK:
+Analyze Fundamental Health, News/Sentiment, and Global Trends simultaneously.
+
+RESPONSE FORMAT (JSON ONLY):
+{
+  "fundamentalSummary": "100-150 words professional report",
+  "newsSummary": "200-300 words bullet points or detailed report",
+  "trendSummary": "200-300 words macro outlook",
+  "recommendation": "Strong Buy|Buy|Hold|Sell|Strong Sell",
+  "confidence": 0-100,
+  "targetPrice": "Estimate",
+  "entryPrice": "Range",
+  "exitPrice": "Target/Stop",
+  "winRate": 0-100,
+  "sentiment": { "positive": 0-1, "neutral": 0-1, "negative": 0-1 },
+  "shortTerm": "Specific tactic (3-5 sentences)",
+  "mediumTerm": "Specific tactic (3-5 sentences)",
+  "longTerm": "Specific tactic (3-5 sentences)",
+  "summary": "15-word master mantra"
+}
+
+Language: ${isZh ? 'Traditional Chinese' : 'English'}.
+Important: Provide high quality, data-driven reasoning for each summary field. No markdown symbols.`;
+
+  console.log(`[AI] Starting single-pass analysis for ${symbol} using ${modelId}...`);
   
-  // Default fallback if unknown
-  if (!apiModel.startsWith('gemini-')) apiModel = 'gemini-1.5-pro';
-
-  const prompt = `
-    You are a professional stock market analyst assistant. 
-    Analyze the following stock data for ${name} (${symbol}):
-    
-    Current Price: ${price}
-    Daily Change: ${changePercent}%
-    Technical Indicators:
-    - MACD Line: ${indicators.macdLine}
-    - MACD Signal: ${indicators.macdSignal}
-    - MACD Histogram: ${indicators.macdHist}
-    - RSI (14): ${indicators.rsi14}
-    - KD (K9): ${indicators.k9}
-    - KD (D9): ${indicators.d9}
-    - MA (5): ${indicators.ma5}
-    - EMA (12): ${indicators.ema12}
-    
-    Based on these indicators, provide a professional analysis.
-    Output MUST be a valid JSON object in the following format (NO other text):
-    {
-      "recommendation": "Strong Buy | Buy | Hold | Sell | Strong Sell",
-      "confidence": number (0-100),
-      "targetPrice": "string (estimated target)",
-      "sentiment": { "positive": float (0-1), "neutral": float (0-1), "negative": float (0-1) },
-      "shortTerm": "string (1-5 days outlook)",
-      "mediumTerm": "string (1-4 weeks outlook)",
-      "longTerm": "string (3-6 months outlook)",
-      "summary": "string (one sentence summary)"
-    }
-    
-    IMPORTANT: Return ONLY the raw JSON object. Do NOT use Markdown formatting (e.g. no \` \` \`json).
-    STRICT: Use only single-line JSON strings. Do NOT use actual newlines inside the JSON values.
-    CONCISE: Keep descriptions under 50 words to avoid response truncation.
-    CRITICAL: Respond ONLY in ${language === 'zh-TW' ? 'Traditional Chinese (zh-TW)' : 'English (en-US)'}.
-  `;
-
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1500,
-          ...(apiModel.includes('1.5') ? { responseMimeType: "application/json" } : {})
-        }
-      })
-    });
+    const text = await callAi(prompt, apiKey, modelId);
+    const jsonStr = extractJson(text);
+    const result = JSON.parse(jsonStr);
 
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Gemini API Error');
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    if (!text) throw new Error('Empty response from AI');
-
-    console.log('[AI Debug] Raw Response:', text);
-
-    // Parse JSON safely with robust extraction
-    try {
-      // Find the JSON block if it's wrapped in markers or text
-      const cleanText = extractJson(text);
-      console.log('[AI Debug] Cleaned JSON:', cleanText);
-      return JSON.parse(cleanText) as AIAnalysis;
-    } catch (parseError) {
-      console.error('[AI Debug] Parse Error:', parseError);
-      throw new Error('AI returned invalid data format');
-    }
-  } catch (error: any) {
-    console.error('AI Analysis Error:', error);
-    throw error;
+    return {
+      fundamentalSummary: stripMarkdown(result.fundamentalSummary),
+      newsSummary: stripMarkdown(result.newsSummary),
+      trendSummary: stripMarkdown(result.trendSummary),
+      recommendation: result.recommendation,
+      confidence: result.confidence,
+      targetPrice: result.targetPrice || 'N/A',
+      entryPrice: result.entryPrice || 'N/A',
+      exitPrice: result.exitPrice || 'N/A',
+      winRate: result.winRate || 50,
+      sentiment: result.sentiment || { positive: 0.5, neutral: 0.3, negative: 0.2 },
+      shortTerm: stripMarkdown(result.shortTerm),
+      mediumTerm: stripMarkdown(result.mediumTerm),
+      longTerm: stripMarkdown(result.longTerm),
+      summary: stripMarkdown(result.summary)
+    };
+  } catch (err) {
+    console.error('AI Analysis failed:', err);
+    throw err;
   }
 }
 
 /**
- * Robustly extracts the JSON object from a string, handling Markdown code blocks 
- * and conversational text prefix/suffix.
+ * Validates an API Key by attempting a small list operation or simple call
  */
-function extractJson(text: string): string {
-  let cleaned = text.trim();
-  
-  // 1. Check for markdown code blocks (e.g. ```json ... ```)
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (codeBlockMatch) {
-    cleaned = codeBlockMatch[1].trim();
-  }
-  
-  // 2. Extra safety: Identify common truncation (missing closing brace)
-  // If it starts with { but doesn't end with }, we might try to find a valid sub-object 
-  // but for now let's just clean up whitespace and illegal newlines.
-  
-  // 3. Fix literal newlines within JSON strings which break JSON.parse
-  // Replacing literal newlines with escaped \n or spaces. 
-  // Only doing this if it doesn't look like we're replacing structural code.
-  cleaned = cleaned.replace(/\n/g, ' ').replace(/\r/g, ' ');
-
-  // 4. Find the first '{' and last '}' to strip remaining noise
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
-  }
-  
-  return cleaned;
-}
-
-/**
- * Validates a Gemini API Key by making a simple request to the models list endpoint
- */
-export async function validateApiKey(apiKey: string): Promise<boolean> {
-  if (!apiKey) return false;
-  
+export async function validateApiKey(apiKey: string, provider: string = 'google'): Promise<boolean> {
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    
-    if (response.ok) {
+    if (provider === 'google') {
+      const ai = new GoogleGenAI({ apiKey });
+      await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: 'Hi'
+      });
       return true;
-    } else {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'Invalid API Key');
+    } else if (provider === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      return res.ok;
     }
-  } catch (error: any) {
-    console.error('API Key Validation Failed:', error);
-    throw error;
+    return false;
+  } catch (error) {
+    console.error('API Key validation failed:', error);
+    throw new Error('Key validation failed. Please check your network or key.');
   }
 }
 
 /**
- * Fetches the list of available models from Gemini and filters for those supporting content generation
+ * Returns available models for the provider via real API calls
  */
-export async function fetchAvailableModels(apiKey: string): Promise<{ id: string, name: string }[]> {
-  if (!apiKey) return [];
+export async function fetchAvailableModels(apiKey: string, provider: string): Promise<{ id: string, name: string }[]> {
+  const models: { id: string, name: string }[] = [];
   
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    
-    if (response.ok) {
-      const data = await response.json();
-      // Filter for models that support generating content and are not legacy
-      return data.models
-        .filter((m: any) => 
-          m.supportedGenerationMethods.includes('generateContent') && 
-          !m.name.includes('vision') && // Filter out vision-only if needed, but usually we want text
-          (m.name.includes('gemini') || m.name.includes('palm'))
-        )
-        .map((m: any) => ({
-          id: m.name.replace('models/', ''), // Strip "models/" prefix
-          name: m.displayName
-        }));
-    } else {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'Failed to fetch models');
+    if (provider === 'google') {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.list();
+      
+      // In @google/genai v1.x, list() returns a Pager that is an AsyncIterable
+      // We iterate through IT to get all models
+      for await (const m of response) {
+        const id = m.name.replace('models/', '');
+        // Only include models that have 'gemini' in their name
+        if (id.toLowerCase().includes('gemini')) {
+          let name = id.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+          if (id === 'gemini-2.0-flash') name += ' (Recommended)';
+          models.push({ id, name });
+        }
+      }
+      
+      return models.sort((a, b) => a.name.localeCompare(b.name));
     }
-  } catch (error: any) {
-    console.error('Fetch Models Error:', error);
-    throw error;
+
+    if (provider === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const data = await res.json();
+      
+      const openAiModels = (data.data || [])
+        .filter((m: any) => m.id.toLowerCase().includes('gpt-4') || m.id.toLowerCase().startsWith('o1'))
+        .map((m: any) => ({
+          id: m.id,
+          name: m.id.toUpperCase()
+        }));
+      
+      return openAiModels.sort((a: any, b: any) => a.name.localeCompare(b.name));
+    }
+  } catch (error) {
+    console.error('Failed to fetch models:', error);
   }
+  
+  // Hard fallbacks to ensure dropdown is NEVER empty
+  if (provider === 'google') {
+    return [
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Default)' },
+      { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash-Lite' },
+      { id: 'gemini-2.0-pro-exp-02-05', name: 'Gemini 2.0 Pro' }
+    ];
+  }
+  
+  return [
+    { id: 'gpt-4o', name: 'GPT-4O' },
+    { id: 'gpt-4o-mini', name: 'GPT-4O MINI' }
+  ];
 }

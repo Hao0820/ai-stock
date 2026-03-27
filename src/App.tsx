@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { Settings, CheckCircle2, XCircle, Info, X } from 'lucide-react';
 import { ScreenState, TabState } from './types';
 import { TopNav } from './components/TopNav';
 import { BottomNav } from './components/BottomNav';
@@ -14,11 +14,22 @@ import { useHistory } from './hooks/useHistory';
 import { clearAllStockCache } from './utils/cache';
 
 export default function App() {
+  const [hasVisited, setHasVisited] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ai-stock-visited') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const initialScreen = (() => {
     try {
-      const saved = localStorage.getItem('ai-stock-keys');
-      if (saved) {
-        const keys = JSON.parse(saved);
+      const savedVisited = localStorage.getItem('ai-stock-visited') === 'true';
+      if (!savedVisited) return 'onboarding';
+
+      const savedKeys = localStorage.getItem('ai-stock-keys');
+      if (savedKeys) {
+        const keys = JSON.parse(savedKeys);
         if (keys.google || keys.openai || keys.claude) {
           return 'main';
         }
@@ -31,13 +42,57 @@ export default function App() {
   const [lastParentScreen, setLastParentScreen] = useState<ScreenState>(initialScreen);
   const [activeTab, setActiveTab] = useState<TabState>('analysis');
   const [selectedStock, setSelectedStock] = useState<{ symbol: string, name: string } | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [activeSubModel, setActiveSubModel] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [selectedModel, setSelectedModel] = useState('google');
   const [apiKeys, setApiKeys] = useState<{ google: string, openai: string, claude: string }>(() => {
     try {
       const saved = localStorage.getItem('ai-stock-keys');
-      return saved ? JSON.parse(saved) : { google: '', openai: '', claude: '' };
+      const parsed = saved ? JSON.parse(saved) : { google: '', openai: '', claude: '' };
+      
+      // Sanitization: Ensure it's an object with the expected keys
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        return { google: '', openai: '', claude: '' };
+      }
+      
+      const cleanKey = (key: any, provider: string) => {
+        if (typeof key !== 'string') return '';
+        let k = key.trim();
+        
+        // Detection: If a single field contains multiple distinct key patterns, it's corrupted
+        const patterns = [/AIzaSy[A-Za-z0-9_-]+/, /sk-[A-Za-z0-9]{40,}/, /ant-api[A-Za-z0-9_-]{50,}/];
+        let matchCount = 0;
+        patterns.forEach(p => {
+          const matches = k.match(new RegExp(p, 'g'));
+          if (matches) matchCount += matches.length;
+        });
+
+        if (matchCount > 1) {
+          console.warn(`[AI Client] Corrupted key detected for ${provider}, purging...`);
+          return '';
+        }
+
+        // Specific Extraction
+        if (provider === 'google') {
+           const match = k.match(/AIzaSy[A-Za-z0-9_-]{33,45}/);
+           return match ? match[0] : '';
+        } else if (provider === 'openai') {
+           const match = k.match(/sk-[A-Za-z0-9]{40,60}/);
+           return match ? match[0] : '';
+        } else if (provider === 'claude') {
+           const match = k.match(/ant-api[A-Za-z0-9_-]{80,}/);
+           return match ? match[0] : '';
+        }
+        
+        return k;
+      };
+
+      return {
+        google: cleanKey(parsed.google, 'google'),
+        openai: cleanKey(parsed.openai, 'openai'),
+        claude: cleanKey(parsed.claude, 'claude')
+      };
     } catch {
       return { google: '', openai: '', claude: '' };
     }
@@ -81,16 +136,24 @@ export default function App() {
   }, [theme]);
 
   const handleStartAnalysis = () => {
+    setHasVisited(true);
+    localStorage.setItem('ai-stock-visited', 'true');
     setCurrentScreen('main');
     setLastParentScreen('main');
   };
 
   const handleViewDetail = (symbol: string, name: string, model?: string) => {
     setSelectedStock({ symbol, name });
+    setSelectedRecordId(null); // Clear record if we are doing a new search
     if (model) setActiveSubModel(model);
     setLastParentScreen('main');
     setCurrentScreen('detail');
-    addHistory({ symbol, name });
+  };
+
+  const handleViewRecord = (recordId: string) => {
+    setSelectedRecordId(recordId);
+    setLastParentScreen('main');
+    setCurrentScreen('detail');
   };
 
   const handleOpenSettings = () => {
@@ -105,20 +168,29 @@ export default function App() {
     setTheme('dark');
     setLanguage('zh-TW');
     setCandleColorStyle('red-up');
-    
+
     // Clear localStorage
     localStorage.removeItem('ai-stock-keys');
     localStorage.removeItem('ai-stock-models');
+    localStorage.removeItem('ai-stock-visited');
     clearHistory();
+    import('./utils/db').then(m => m.analysisDb.clearAll());
     clearAllStockCache();
-    
+
+    setHasVisited(false);
     showToast(t('common.toast.success.updated'), 'success');
     setCurrentScreen('onboarding');
   };
 
   const handleBack = () => {
-    setCurrentScreen(lastParentScreen);
-    setSelectedStock(null);
+    if (currentScreen === 'settings') {
+      setCurrentScreen(lastParentScreen);
+      // Do NOT clear selectedStock/recordId when just returning from settings
+    } else {
+      setCurrentScreen('main');
+      setSelectedStock(null);
+      setSelectedRecordId(null);
+    }
   };
 
   return (
@@ -139,7 +211,7 @@ export default function App() {
               setSelectedModel={setSelectedModel}
               apiKeys={apiKeys}
               setApiKeys={setApiKeys}
-              onSuccess={(msg) => showToast(msg, 'success')}
+              onSuccess={(msg, type) => showToast(msg, type || 'success')}
               setAvailableModels={setAvailableModels}
             />
           </motion.div>
@@ -165,7 +237,7 @@ export default function App() {
                     availableModels={availableModels[selectedModel] || []}
                   />
                 ) : (
-                  <HistoryTab onViewDetail={handleViewDetail} history={history} onClear={clearHistory} />
+                  <HistoryTab onViewRecord={handleViewRecord} candleColorStyle={candleColorStyle} />
                 )}
               </div>
             </main>
@@ -185,16 +257,11 @@ export default function App() {
               onBack={handleBack}
               theme={theme}
               setTheme={setTheme}
-              selectedModel={selectedModel}
-              setSelectedModel={setSelectedModel}
-              apiKeys={apiKeys}
-              setApiKeys={setApiKeys}
               candleColorStyle={candleColorStyle}
               setCandleColorStyle={setCandleColorStyle}
               language={language as any}
               setLanguage={setLanguage as any}
               onSuccess={(msg) => showToast(msg, 'success')}
-              setAvailableModels={setAvailableModels}
               onFullReset={handleFullReset}
             />
           </motion.div>
@@ -211,6 +278,7 @@ export default function App() {
             <DetailScreen
               stock={selectedStock?.symbol || '2330.TW'}
               initialName={selectedStock?.name}
+              recordId={selectedRecordId}
               onBack={handleBack}
               onSettingsClick={handleOpenSettings}
               candleColorStyle={candleColorStyle}
@@ -231,18 +299,17 @@ export default function App() {
             className="fixed top-0 left-1/2 z-[9999] w-full max-w-sm px-4"
           >
             <div className="bg-surface-container-high/80 backdrop-blur-xl border border-outline-variant/20 rounded-2xl p-4 shadow-2xl flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                toast.type === 'success' ? 'bg-primary/20 text-primary' : 
-                toast.type === 'error' ? 'bg-error/20 text-error' : 'bg-secondary/20 text-secondary'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${toast.type === 'success' ? 'bg-primary/20 text-primary' :
+                  toast.type === 'error' ? 'bg-error/20 text-error' : 'bg-secondary/20 text-secondary'
+                }`}>
                 {toast.type === 'success' && <CheckCircle2 className="w-5 h-5" />}
-                {toast.type === 'error' && <AlertCircle className="w-5 h-5" />}
+                {toast.type === 'error' && <XCircle className="w-5 h-5" />}
                 {toast.type === 'info' && <Info className="w-5 h-5" />}
               </div>
               <div className="flex-grow overflow-hidden">
                 <p className="text-sm font-bold text-on-surface truncate">{toast.message}</p>
               </div>
-              <button 
+              <button
                 onClick={() => setToast(null)}
                 className="p-1 hover:bg-on-surface/5 rounded-lg text-on-surface-variant transition-colors"
               >

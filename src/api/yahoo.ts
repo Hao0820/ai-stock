@@ -218,3 +218,27 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
     return null;
   }
 }
+
+/**
+ * Fetch both English and Chinese names for a specific symbol using the search API.
+ */
+export async function fetchLocalizedNames(symbol: string): Promise<{ en: string, zh: string }> {
+  try {
+    const [enRes, zhRes] = await Promise.all([
+      searchStockSuggestions(symbol, 'en-US'),
+      searchStockSuggestions(symbol, 'zh-TW')
+    ]);
+    
+    // Find exact match or default to first suggestion
+    const enMatch = enRes.find(q => q.symbol.toUpperCase() === symbol.toUpperCase()) || enRes[0];
+    const zhMatch = zhRes.find(q => q.symbol.toUpperCase() === symbol.toUpperCase()) || zhRes[0];
+    
+    return {
+      en: enMatch?.shortname || symbol,
+      zh: zhMatch?.shortname || symbol
+    };
+  } catch (err) {
+    console.error('Error fetching localized names:', err);
+    return { en: symbol, zh: symbol };
+  }
+}

@@ -105,13 +105,10 @@ export function AnalysisTab({ onAnalyze, selectedModel, language, availableModel
                 onChange={(e) => setSubModel(e.target.value)}
                 className="w-full bg-surface-container-lowest border-none rounded-xl py-4 pl-5 pr-14 text-on-surface font-body appearance-none cursor-pointer outline-none focus:ring-1 focus:ring-primary/40 truncate"
               >
-                {availableModels.length > 0 ? (
-                  availableModels.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))
-                ) : (
-                  <option value="">{t('onboarding.model.label')}</option>
-                )}
+                <option value="" disabled hidden>{t('onboarding.model.label')}</option>
+                {availableModels.length > 0 && availableModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
               </select>
               <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-40 flex items-center gap-2 text-on-surface group-focus-within:opacity-80 transition-opacity">
                 <Cpu className="w-4 h-4" />
