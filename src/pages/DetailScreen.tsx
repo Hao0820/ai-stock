@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useTransition, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, BarChart3, BrainCircuit, Clock, Target, Rocket, Globe, ShieldAlert, Loader2, Settings } from 'lucide-react';
+import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, BarChart3, BrainCircuit, Clock, Target, Rocket, Globe, ShieldAlert, Loader2, Settings, Newspaper, Banknote } from 'lucide-react';
 import { fetchStockDetail, StockDetailResult, ProcessedChartData, fetchLocalizedNames } from '../api/yahoo';
 import { analyzeStock, stripMarkdown } from '../api/ai';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -137,12 +137,18 @@ export function DetailScreen({
   const dailyDetail = dataStore.D;
   const stockDetail = dataStore[activeRes];
 
-  // AI triggering effect
-  useEffect(() => {
-    // If we are viewing a historical record, don't trigger AI
-    if (recordId) return;
+  const skeletonSavedRef = useRef(false);
+  const [currentRecordId, setCurrentRecordId] = useState<string | null>(null);
 
-    // We need both dailyDetail (for general info) and stockDetail (for current indicator values)
+  // AI triggering effect - Refactored for Two-Phase Saving
+  useEffect(() => {
+    // If we have analysis or are currently loading, don't trigger
+    if (aiAnalysis || isAiLoading || aiError) return;
+
+    // If we already saved skeleton in THIS session, don't re-trigger manually
+    if (skeletonSavedRef.current) return;
+
+    // We need dailyDetail to create the initial skeleton
     if (!dailyDetail || !stockDetail || aiAnalysis || isAiLoading || aiError) return;
 
     const runAnalysis = async () => {
@@ -166,24 +172,13 @@ export function DetailScreen({
       }
 
       try {
-        const result = await analyzeStock(
-          dailyDetail!.symbol,
-          dailyDetail!.name || stock,
-          dailyDetail!.price,
-          dailyDetail!.changePercent,
-          stockDetail?.indicators || {},
-          key,
-          modelId,
-          language as 'zh-TW' | 'en-US'
-        );
-        setAiAnalysis(result);
-
-        // CREATE SNAPSHOT IN INDEXEDDB
         const { analysisDb } = await import('../utils/db');
         const localizedNames = await fetchLocalizedNames(dailyDetail!.symbol);
 
-        const record = {
-          id: `record_${Date.now()}_${dailyDetail!.symbol}`,
+        // --- PHASE 1: IMMEDIATE SKELETON SAVE (Skip if we already have recordId) ---
+        const newRecordId = recordId || `record_${Date.now()}_${dailyDetail!.symbol}`;
+        const skeletonRecord = {
+          id: newRecordId,
           symbol: dailyDetail!.symbol,
           name: dailyDetail!.name || stock,
           nameEn: localizedNames.en,
@@ -191,17 +186,50 @@ export function DetailScreen({
           timestamp: Date.now(),
           price: dailyDetail!.price,
           changePercent: dailyDetail!.changePercent,
-          analysis: result,
           ohlcv: dataStore,
           indicators: stockDetail?.indicators || {},
           model: modelId,
           language: language
         };
-        await analysisDb.saveRecord(record);
+
+        await analysisDb.saveRecord(skeletonRecord);
+        skeletonSavedRef.current = true;
+        setCurrentRecordId(newRecordId);
+
+        // --- PHASE 2: DETACHED BACKGROUND ANALYSIS ---
+        // We don't await the AI result here for the skeleton save,
+        // but we keep the promise running to update the record later.
+        const nameToUse = language === 'zh-TW' ? (localizedNames.zh || dailyDetail!.name || stock) : (localizedNames.en || dailyDetail!.name || stock);
+
+        analyzeStock(
+          dailyDetail!.symbol,
+          nameToUse,
+          dailyDetail!.price,
+          dailyDetail!.changePercent,
+          stockDetail?.indicators || {},
+          key,
+          modelId,
+          language as 'zh-TW' | 'en-US'
+        ).then(async (result) => {
+          // Re-fetch current record state to avoid overwriting newer status if any
+          const updatedRecord = {
+            ...skeletonRecord,
+            analysis: result
+          };
+
+          await analysisDb.saveRecord(updatedRecord);
+
+          // Update local UI state if user is still on this screen
+          setAiAnalysis(result);
+          setIsAiLoading(false);
+        }).catch((err: any) => {
+          console.error("Background AI Analysis failed:", err);
+          setAiError(err.message || 'AI Analysis failed');
+          setIsAiLoading(false);
+        });
 
       } catch (err: any) {
-        setAiError(err.message || 'AI Analysis failed');
-      } finally {
+        setAiError(err.message || 'Initialization failed');
         setIsAiLoading(false);
       }
     };
@@ -233,7 +261,7 @@ export function DetailScreen({
 
     try {
       const chartOptions: any = {
-        layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#cbd5e1', fontSize: 10 },
+        layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#cbd5e1', fontSize: 13 },
         grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
         crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(255,255,255,0.4)', width: 1 as const, style: LineStyle.Dashed }, horzLine: { color: 'rgba(255,255,255,0.4)', width: 1 as const, style: LineStyle.Dashed } },
         rightPriceScale: {
@@ -397,7 +425,7 @@ export function DetailScreen({
           >
             <ArrowLeft className="w-6 h-6" />
           </button>
-          <h1 className="font-headline font-bold tracking-tight text-xl text-primary">{dailyDetail ? dailyDetail.symbol : stock} </h1>
+          <h1 className="font-headline font-bold tracking-tight text-xl text-on-surface/90">{t('onboarding.title')}</h1>
         </div>
         <button
           onClick={onSettingsClick}
@@ -417,11 +445,16 @@ export function DetailScreen({
         <header className="mb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="flex flex-wrap items-end justify-between gap-6">
             <div className="flex flex-col gap-2 min-w-0">
-              <span className="font-label text-sm uppercase tracking-widest text-primary mb-1 block">
-                {recordNames
-                  ? (language === 'zh-TW' ? recordNames.zh : recordNames.en)
-                  : (initialName && initialName !== stock ? initialName : dailyDetail?.name) || t('common.loading')}
-              </span>
+              <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+                <span className="font-headline text-2xl md:text-3xl font-black text-on-surface tracking-tight">
+                  {recordNames
+                    ? (language === 'zh-TW' ? recordNames.zh : recordNames.en)
+                    : (initialName && initialName !== stock ? initialName : dailyDetail?.name) || t('common.loading')}
+                </span>
+                <span className="font-headline text-2xl md:text-3xl font-black text-on-surface tracking-tight">
+                  {dailyDetail ? dailyDetail.symbol : stock}
+                </span>
+              </div>
               <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
                 <h2 className={`font-headline text-4xl md:text-5xl font-extrabold tracking-tighter ${isUpColor} whitespace-nowrap`}>
                   {displayPrice?.toFixed(2) || '---.--'}
@@ -466,6 +499,7 @@ export function DetailScreen({
                   onClick={() => {
                     setAiError(null);
                     setAiAnalysis(null);
+                    skeletonSavedRef.current = false;
                   }}
                   className="px-8 py-3 bg-error text-on-error rounded-2xl font-bold text-sm hover:brightness-110 active:scale-95 transition-all w-full md:w-auto"
                 >
@@ -515,12 +549,12 @@ export function DetailScreen({
 
               <div className="relative flex-grow flex flex-col p-6 pr-2">
                 <div className="flex justify-between items-center mb-2 pl-2 z-10">
-                  <div className="flex bg-surface-container-high p-1 rounded-xl z-10 pointer-events-auto ml-auto">
+                  <div className="flex bg-surface-container-high p-1 rounded-xl z-10 pointer-events-auto ml-auto mr-[25px]">
                     {(['D', 'W', 'M'] as Resolution[]).map((res) => (
                       <button
                         key={res}
                         onClick={() => handleResChange(res)}
-                        className={`px-4 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeRes === res && !isSwitchingRes ? 'bg-primary text-on-primary shadow-lg' : 'text-on-surface-variant hover:text-on-surface'}`}
+                        className={`px-6 py-2 text-sm font-bold rounded-xl transition-all ${activeRes === res && !isSwitchingRes ? 'bg-primary text-on-primary shadow-lg' : 'text-on-surface-variant hover:text-on-surface'}`}
                       >
                         {t(`detail.res.${res === 'D' ? 'day' : res === 'W' ? 'week' : 'month'}`)}
                       </button>
@@ -533,15 +567,15 @@ export function DetailScreen({
                     <div ref={mainChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full" style={{ flex: 15 }}>
-                    <span className="absolute left-2 top-0 text-[9px] font-bold text-purple-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.rsi')}</span>
+                    <span className="absolute left-2 top-0 text-xs font-bold text-purple-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.rsi')}</span>
                     <div ref={rsiChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full" style={{ flex: 15 }}>
-                    <span className="absolute left-2 top-0 text-[9px] font-bold text-orange-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.kd')}</span>
+                    <span className="absolute left-2 top-0 text-xs font-bold text-orange-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.kd')}</span>
                     <div ref={kdChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full pb-4" style={{ flex: 25 }}>
-                    <span className="absolute left-2 top-0 text-[9px] font-bold text-rose-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.macd')}</span>
+                    <span className="absolute left-2 top-0 text-xs font-bold text-rose-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.macd')}</span>
                     <div ref={macdChartRef} className="w-full h-full" />
                   </div>
                 </div>
@@ -564,40 +598,63 @@ export function DetailScreen({
                 </div>
               ) : aiAnalysis ? (
                 <div className="relative z-10">
-                  <h3 className="font-headline text-lg font-bold text-on-surface mb-8">{t('detail.analysis.levels')}</h3>
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Banknote className="w-6 h-6 text-primary" />
+                    </div>
+                    <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.analysis.levels')}</h3>
+                  </div>
                   <div className="grid grid-cols-2 gap-x-8 gap-y-12 py-12 border-y border-white/5 items-center mb-10">
                     {/* Row 1: Entry and Win Rate */}
                     <div className="space-y-2 text-center">
-                      <p className="text-xs text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.entry')}</p>
-                      <p className="text-2xl md:text-4xl font-headline font-bold text-on-surface">{aiAnalysis.entryPrice || 'N/A'}</p>
+                      <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.entryRange')}</p>
+                      <p className="text-2xl md:text-4xl font-headline font-bold text-on-surface">
+                        {(() => {
+                          if (!aiAnalysis.entryPrice) return 'N/A';
+                          // Try to format range like "88-92" to "88.00 - 92.00"
+                          return aiAnalysis.entryPrice.replace(/([0-9.]+)/g, (match) => {
+                            const val = parseFloat(match);
+                            return isNaN(val) ? match : val.toFixed(2);
+                          });
+                        })()}
+                      </p>
                     </div>
                     <div className="space-y-2 text-center">
-                      <p className="text-xs text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.winRate')}</p>
+                      <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.winRate')}</p>
                       <p className="text-2xl md:text-4xl font-headline font-bold text-primary">{aiAnalysis.winRate || 0}%</p>
                     </div>
 
                     {/* Row 2: Stop Loss and Take Profit */}
                     {(() => {
                       const exitParts = (aiAnalysis.exitPrice || '').split(/[/|-]/);
-                      const stopLoss = exitParts.length > 1 ? exitParts[0]?.trim() : (aiAnalysis.exitPrice || 'N/A');
-                      const takeProfit = exitParts.length > 1 ? exitParts[1]?.trim() : (aiAnalysis.targetPrice || 'N/A');
+                      const p1 = parseFloat(exitParts[0]?.replace(/[^0-9.]/g, '') || '0');
+                      const p2 = parseFloat(exitParts[1]?.replace(/[^0-9.]/g, '') || '0');
+
+                      // For a long (buy) position, lower is stop loss, higher is take profit
+                      const values = [p1, p2].filter(v => v > 0).sort((a, b) => a - b);
+                      const slVal = values[0] || 0;
+                      const tpVal = values[1] || p1 || 0;
+
+                      const isRedUp = t('settings.candle.up') === '漲';
+                      const upColorClass = isRedUp ? 'text-red-400' : 'text-green-400';
+                      const downColorClass = isRedUp ? 'text-green-400' : 'text-red-400';
 
                       return (
                         <>
                           <div className="space-y-2 text-center">
-                            <p className="text-xs text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.stopLoss')}</p>
-                            <p className="text-2xl md:text-4xl font-headline font-bold text-error/80">{stopLoss}</p>
+                            <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.stopLoss')}</p>
+                            <p className={`text-2xl md:text-4xl font-headline font-bold ${downColorClass}`}>{slVal.toFixed(2)}</p>
                           </div>
                           <div className="space-y-2 text-center">
-                            <p className="text-xs text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.takeProfit')}</p>
-                            <p className="text-2xl md:text-4xl font-headline font-bold text-secondary">{takeProfit}</p>
+                            <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.takeProfit')}</p>
+                            <p className={`text-2xl md:text-4xl font-headline font-bold ${upColorClass}`}>{tpVal.toFixed(2)}</p>
                           </div>
                         </>
                       );
                     })()}
                   </div>
                   <div className="bg-surface-container-low p-6 rounded-2xl border border-white/5">
-                    <p className="text-sm leading-relaxed text-on-surface/80 italic text-center">"{stripMarkdown(aiAnalysis.summary)}"</p>
+                    <p className="text-base leading-relaxed text-on-surface/80 italic text-center">"{stripMarkdown(aiAnalysis.summary)}"</p>
                   </div>
                 </div>
               ) : null}
@@ -605,14 +662,12 @@ export function DetailScreen({
           </section>
 
           {/* 2. Integrated News Sentiment Analysis */}
-          <section className="w-full bg-surface-container rounded-[2.5rem] p-8 md:p-12 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
+          <section className="w-full bg-surface-container rounded-3xl p-8 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
             <div className="flex items-center gap-4 mb-10">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-                <BrainCircuit className="w-6 h-6 text-primary" />
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                <Newspaper className="w-6 h-6 text-primary" />
               </div>
-              <div>
-                <h3 className="font-headline text-2xl font-bold text-on-surface">新聞情緒深度分析</h3>
-              </div>
+              <h3 className="font-headline text-xl font-bold text-on-surface">新聞情緒深度分析</h3>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-stretch">
@@ -629,7 +684,7 @@ export function DetailScreen({
                 {isAiLoading ? (
                   <div className="h-full bg-on-surface/5 rounded-3xl animate-pulse" />
                 ) : aiAnalysis ? (
-                  <div className="h-full text-sm text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-8 rounded-[2rem] border border-white/5 whitespace-pre-wrap shadow-inner overflow-auto custom-scrollbar">
+                  <div className="h-full text-base text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-8 rounded-[2rem] border border-white/5 whitespace-pre-wrap shadow-inner overflow-auto custom-scrollbar">
                     {stripMarkdown(aiAnalysis.newsSummary)}
                   </div>
                 ) : null}
@@ -641,7 +696,9 @@ export function DetailScreen({
           <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
               <div className="flex items-center gap-4">
-                <Clock className="w-6 h-6 text-primary" />
+                <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <Clock className="w-6 h-6 text-primary" />
+                </div>
                 <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.timeline.title')}</h3>
               </div>
               <div className="flex bg-surface-container-high p-1.5 rounded-2xl self-start md:self-auto">
@@ -660,7 +717,7 @@ export function DetailScreen({
               {isAiLoading ? (
                 <div className="w-full h-12 bg-on-surface/5 rounded-xl animate-pulse" />
               ) : aiAnalysis ? (
-                <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap">
+                <p className="text-base text-on-surface-variant leading-relaxed whitespace-pre-wrap">
                   {stripMarkdown(aiTab === 'short' ? aiAnalysis.shortTerm : aiTab === 'medium' ? aiAnalysis.mediumTerm : aiAnalysis.longTerm)}
                 </p>
               ) : null}
@@ -670,13 +727,15 @@ export function DetailScreen({
           {/* 4. Fundamental Standalone */}
           <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-250">
             <div className="flex items-center gap-4 mb-6">
-              <BarChart3 className="w-6 h-6 text-primary" />
-              <h3 className="font-headline text-lg font-bold text-on-surface">{t('detail.experts.fundamental')}</h3>
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+                <BarChart3 className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.experts.fundamental')}</h3>
             </div>
             {isAiLoading ? (
               <div className="h-20 bg-on-surface/5 rounded-2xl animate-pulse" />
             ) : aiAnalysis ? (
-              <div className="text-sm text-on-surface-variant leading-relaxed bg-surface-container-low p-6 rounded-2xl border border-white/5 whitespace-pre-wrap">
+              <div className="text-base text-on-surface-variant leading-relaxed bg-surface-container-low p-6 rounded-2xl border border-white/5 whitespace-pre-wrap">
                 {stripMarkdown(aiAnalysis.fundamentalSummary)}
               </div>
             ) : null}
@@ -685,28 +744,21 @@ export function DetailScreen({
           {/* 5. Global Trend Standalone */}
           <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
             <div className="flex items-center gap-4 mb-6">
-              <Globe className="w-6 h-6 text-secondary" />
-              <h3 className="font-headline text-lg font-bold text-on-surface">{t('detail.experts.trend')}</h3>
+              <div className="w-12 h-12 rounded-2xl bg-secondary/10 flex items-center justify-center shrink-0">
+                <Globe className="w-6 h-6 text-secondary" />
+              </div>
+              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.experts.trend')}</h3>
             </div>
             {isAiLoading ? (
               <div className="h-20 bg-on-surface/5 rounded-2xl animate-pulse" />
             ) : aiAnalysis ? (
-              <div className="text-sm text-on-surface-variant leading-relaxed bg-surface-container-low p-6 rounded-2xl border border-white/5 whitespace-pre-wrap">
+              <div className="text-base text-on-surface-variant leading-relaxed bg-surface-container-low p-6 rounded-2xl border border-white/5 whitespace-pre-wrap">
                 {stripMarkdown(aiAnalysis.trendSummary)}
               </div>
             ) : null}
           </section>
         </div>
 
-        <footer className="mt-16 pt-8 border-t border-outline-variant/10">
-          <div className="flex items-start gap-4 p-6 rounded-2xl bg-surface-container-low/50 border border-outline-variant/5 text-on-surface-variant/70 text-[11px] leading-relaxed">
-            <ShieldAlert className="w-5 h-5 shrink-0" />
-            <div className="space-y-1">
-              <h4 className="font-bold uppercase tracking-widest">{t('disclaimer.title')}</h4>
-              <p>{t('disclaimer.desc')}</p>
-            </div>
-          </div>
-        </footer>
       </main>
     </div>
   );

@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Cpu, Search, ArrowRight, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
+import { Cpu, Search, ArrowRight, Loader2, AlertCircle, ChevronDown, ShieldAlert } from 'lucide-react';
 import { searchStock, searchStockSuggestions, StockSuggestion } from '../api/yahoo';
 import { useTranslation } from '../contexts/LanguageContext';
 
-export function AnalysisTab({ onAnalyze, selectedModel, language, availableModels }: { 
-  onAnalyze: (symbol: string, name: string, model: string) => void, 
-  selectedModel: string, 
+export function AnalysisTab({ onAnalyze, selectedModel, language, availableModels }: {
+  onAnalyze: (symbol: string, name: string, model: string) => void,
+  selectedModel: string,
   language: 'zh-TW' | 'en-US',
-  availableModels: { id: string, name: string }[] 
+  availableModels: { id: string, name: string }[]
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
-  
+
   const [subModel, setSubModel] = useState(availableModels[0]?.id || '');
 
   useEffect(() => {
@@ -92,7 +92,7 @@ export function AnalysisTab({ onAnalyze, selectedModel, language, availableModel
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="w-full flex justify-center"
+      className="w-full flex flex-col items-center"
     >
       <div className="bg-surface-container rounded-xl py-12 px-8 shadow-none relative overflow-visible w-full max-w-md">
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -100,7 +100,7 @@ export function AnalysisTab({ onAnalyze, selectedModel, language, availableModel
           <div className="space-y-3 text-left">
             <label className="font-label text-xs font-bold uppercase tracking-widest text-primary ml-1">{t('analysis.layer')}</label>
             <div className="relative group">
-              <select 
+              <select
                 value={subModel}
                 onChange={(e) => setSubModel(e.target.value)}
                 className="w-full bg-surface-container-lowest border-none rounded-xl py-4 pl-5 pr-14 text-on-surface font-body appearance-none cursor-pointer outline-none focus:ring-1 focus:ring-primary/40 truncate"
@@ -213,6 +213,20 @@ export function AnalysisTab({ onAnalyze, selectedModel, language, availableModel
             )}
           </button>
         </form>
+      </div>
+
+      {/* Disclaimer: Completely outside and below the main block */}
+      <div className="mt-8 space-y-4 w-full max-w-md mx-auto px-1 animate-in fade-in duration-1000">
+        <div className="flex items-start gap-4 p-5 rounded-2xl bg-surface-container-low/25 border border-outline-variant/5 text-on-surface-variant/60 text-xs leading-relaxed shadow-sm">
+          <ShieldAlert className="w-5 h-5 shrink-0 text-on-surface-variant/30" />
+          <div className="space-y-2">
+            <h4 className="font-bold uppercase tracking-widest text-[11px] text-on-surface-variant/50">{t('disclaimer.title')}</h4>
+            <p>{t('disclaimer.desc')}</p>
+          </div>
+        </div>
+        <p className="text-xs text-on-surface-variant/40 text-center font-bold px-4 leading-normal">
+          {t('disclaimer.agreement')}
+        </p>
       </div>
     </motion.div>
   );

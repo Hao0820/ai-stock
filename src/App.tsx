@@ -102,7 +102,22 @@ export default function App() {
   const [availableModels, setAvailableModels] = useState<Record<string, { id: string, name: string }[]>>(() => {
     try {
       const saved = localStorage.getItem('ai-stock-models');
-      return saved ? JSON.parse(saved) : {};
+      const parsed = saved ? JSON.parse(saved) : {};
+      
+      // Auto-Sanitization: Purge non-text models but ALLOW preview/exp for latest Gemini
+      const excluded = ['embedding', 'audio', 'live', 'robot', 'tts', 'vision', 'image', 'search'];
+      const sanitized: Record<string, { id: string, name: string }[]> = {};
+      
+      Object.keys(parsed).forEach(provider => {
+        if (Array.isArray(parsed[provider])) {
+          sanitized[provider] = parsed[provider].filter((m: any) => {
+            const lowerId = m.id.toLowerCase();
+            return !excluded.some(k => lowerId.includes(k));
+          });
+        }
+      });
+
+      return sanitized;
     } catch {
       return {};
     }

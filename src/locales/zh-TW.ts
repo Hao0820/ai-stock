@@ -54,7 +54,13 @@ export const zhTW = {
   'history.sentiment.bullish': '看漲',
   'history.sentiment.bearish': '看跌',
   'history.sentiment.neutral': '中立',
+  'history.sentiment.processing': '分析中...',
   'history.sentiment.correction': '修正',
+  'history.clear.button': '刪除紀錄',
+  'history.clear.confirm.title': '刪除所有歷史紀錄',
+  'history.clear.confirm.message': '確定要刪除所有本地存儲的分析紀錄嗎？',
+  'history.delete.selected': '刪除所選 ({0})',
+  'history.delete.confirm.selected': '確定要刪除選定的 {0} 筆分析紀錄嗎？',
 
   // Settings
   'settings.title': '系統設定',
@@ -125,9 +131,10 @@ export const zhTW = {
   'detail.analysis.levels': '精確進場/出場建議',
   'detail.analysis.winRate': '勝率',
   'detail.analysis.entry': '建議進場',
+  'detail.analysis.entryRange': '進場區間',
   'detail.analysis.exit': '目標出場',
-  'detail.analysis.stopLoss': '止損',
-  'detail.analysis.takeProfit': '獲利',
+  'detail.analysis.stopLoss': '停損',
+  'detail.analysis.takeProfit': '目標價',
   'detail.analysis.failed': 'AI 分析失敗',
   'detail.analysis.retry': '重試分析',
   'detail.experts.title': '專家戰略報告',
@@ -145,7 +152,8 @@ export const zhTW = {
 
   // Disclaimer
   'disclaimer.title': '投資建議免責聲明',
-  'disclaimer.desc': '本分析報告目前部份文字由靜態預覽生成，圖表與頂部報價為真實市場資料。僅供參考之用，不構成任何形式的投資建議、要約或邀請。'
+  'disclaimer.desc': '本分析報告目前部份文字由靜態預覽生成，圖表與頂部報價為真實市場資料。僅供參考之用，不構成任何形式的投資建議、要約或邀請。',
+  'disclaimer.agreement': '點擊「開始分析」即表示您已閱讀並同意以上免責聲明。',
 };
 
 export type Translations = typeof zhTW;

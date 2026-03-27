@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TrendingUp, TrendingDown, LineChart, Calendar, ChevronRight, History, Trash2, ShieldAlert, Clock, BrainCircuit } from 'lucide-react';
+import { TrendingUp, TrendingDown, LineChart, Calendar, ChevronRight, History, Trash2, ShieldAlert, Clock, BrainCircuit, X, CheckCircle2, Circle, Loader2 } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
 import { AnalysisRecord } from '../types';
 import { analysisDb } from '../utils/db';
+import { ConfirmModal } from './ConfirmModal';
 
 export function HistoryTab({ 
   onViewRecord,
@@ -15,6 +16,9 @@ export function HistoryTab({
   const { t, language } = useTranslation();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     async function loadRecords() {
@@ -27,26 +31,54 @@ export function HistoryTab({
         setLoading(false);
       }
     }
+    
     loadRecords();
+
+    // Subscribe to live DB updates (including background AI back-fills)
+    const unsubscribe = analysisDb.subscribe(loadRecords);
+    return () => unsubscribe();
   }, []);
 
   const handleClear = async () => {
-    if (confirm(t('settings.danger.reset.confirm'))) {
+    if (isEditMode) {
+      if (selectedIds.size === 0) return;
+      const idsToDelete = Array.from(selectedIds);
+      await Promise.all(idsToDelete.map((id: string) => analysisDb.deleteRecord(id)));
+      setRecords(prev => prev.filter(r => !selectedIds.has(r.id)));
+      setSelectedIds(new Set());
+      setIsEditMode(false);
+    } else {
       await analysisDb.clearAll();
       setRecords([]);
     }
+    setIsClearConfirmOpen(false);
   };
 
-  const deleteOne = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    await analysisDb.deleteRecord(id);
-    setRecords(prev => prev.filter(r => r.id !== id));
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitEditMode = () => {
+    setIsEditMode(false);
+    setSelectedIds(new Set());
   };
 
   const getSentimentInfo = (record: AnalysisRecord) => {
+    if (!record.analysis) {
+      return { 
+        label: 'Processing', 
+        icon: <Loader2 className="w-5 h-5 text-on-surface-variant/40 animate-spin" />, 
+        style: 'bg-on-surface/5 text-on-surface-variant/60' 
+      };
+    }
     const s = record.analysis.sentiment;
-    if (s.positive > 0.6) return { label: 'Bullish', icon: <TrendingUp className="w-5 h-5 text-primary" />, style: 'bg-primary/10 text-primary' };
-    if (s.negative > 0.4) return { label: 'Bearish', icon: <TrendingDown className="w-5 h-5 text-error" />, style: 'bg-error/10 text-error' };
+    if (s.positive >= 0.6) return { label: 'Bullish', icon: <TrendingUp className="w-5 h-5 text-primary" />, style: 'bg-primary/10 text-primary' };
+    if (s.negative >= 0.4) return { label: 'Bearish', icon: <TrendingDown className="w-5 h-5 text-error" />, style: 'bg-error/10 text-error' };
     return { label: 'Neutral', icon: <LineChart className="w-5 h-5 text-secondary" />, style: 'bg-secondary/10 text-secondary' };
   };
 
@@ -64,12 +96,50 @@ export function HistoryTab({
         </div>
         
         {records.length > 0 && (
-          <button 
-            onClick={handleClear}
-            className="p-3 text-on-surface-variant hover:text-error transition-all bg-surface-container-high rounded-2xl active:scale-95 group shadow-lg"
-          >
-            <Trash2 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-          </button>
+          <div className="flex items-center gap-2">
+            <AnimatePresence>
+              {isEditMode ? (
+                <>
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    onClick={exitEditMode}
+                    className="p-3 text-on-surface-variant hover:bg-surface-container-high rounded-2xl transition-all active:scale-95 flex items-center gap-2 px-4 text-xs font-bold"
+                  >
+                    <X className="w-4 h-4" />
+                    {t('common.cancel')}
+                  </motion.button>
+                  <motion.button
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    onClick={() => setIsClearConfirmOpen(true)}
+                    disabled={selectedIds.size === 0}
+                    className={`p-3 rounded-2xl transition-all active:scale-95 flex items-center gap-2 px-4 text-xs font-bold shadow-lg ${
+                      selectedIds.size > 0 
+                        ? 'bg-error text-on-error hover:bg-error/90' 
+                        : 'bg-surface-container-high text-on-surface-variant/40 cursor-not-allowed'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    {selectedIds.size === records.length 
+                      ? t('history.clear.button') 
+                      : t('history.delete.selected').replace('{0}', selectedIds.size.toString())}
+                  </motion.button>
+                </>
+              ) : (
+                <motion.button 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  onClick={() => setIsEditMode(true)}
+                  className="p-3 text-on-surface-variant hover:text-primary transition-all bg-surface-container-high rounded-2xl active:scale-95 group shadow-lg"
+                >
+                  <Trash2 className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
         )}
       </div>
 
@@ -106,13 +176,42 @@ export function HistoryTab({
               return (
                 <motion.div 
                   key={record.id}
+                  layout
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  onClick={() => onViewRecord(record.id)}
-                  className="group relative overflow-hidden bg-surface-container rounded-3xl p-6 transition-all hover:bg-surface-container-high active:scale-[0.99] duration-300 cursor-pointer border border-outline-variant/5 hover:border-primary/20 shadow-lg hover:shadow-primary/5"
+                  onClick={() => {
+                    if (isEditMode) {
+                      toggleSelect(record.id);
+                    } else {
+                      onViewRecord(record.id);
+                    }
+                  }}
+                  className={`group relative overflow-hidden bg-surface-container rounded-3xl p-6 transition-all duration-300 cursor-pointer border shadow-lg ${
+                    isEditMode && selectedIds.has(record.id)
+                      ? 'border-primary bg-primary/5 shadow-primary/5'
+                      : 'border-outline-variant/5 hover:border-primary/20 hover:bg-surface-container-high hover:shadow-primary/5'
+                  }`}
                 >
-                  <div className="flex justify-between items-center w-full">
+                  <div className="flex items-center w-full">
+                    {/* Multi-select checkmark */}
+                    <AnimatePresence>
+                      {isEditMode && (
+                        <motion.div
+                          initial={{ width: 0, opacity: 0, marginRight: 0 }}
+                          animate={{ width: 'auto', opacity: 1, marginRight: 16 }}
+                          exit={{ width: 0, opacity: 0, marginRight: 0 }}
+                          className="shrink-0"
+                        >
+                          {selectedIds.has(record.id) ? (
+                            <CheckCircle2 className="w-6 h-6 text-primary" />
+                          ) : (
+                            <Circle className="w-6 h-6 text-on-surface-variant/20" />
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     {/* Left & Center Information */}
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <div className="w-14 h-14 rounded-2xl bg-surface-container-lowest flex items-center justify-center shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-500">
@@ -129,7 +228,7 @@ export function HistoryTab({
                           </span>
                         </div>
                         
-                        <p className="text-sm text-on-surface-variant/80 font-medium truncate max-w-[180px] md:max-w-xs mb-1">
+                        <p className="text-sm text-on-surface-variant/80 font-medium truncate max-w-[150px] md:max-w-xs mb-1">
                           {language === 'zh-TW' ? (record.nameZh || record.name) : (record.nameEn || record.name)}
                         </p>
                         
@@ -146,31 +245,23 @@ export function HistoryTab({
                         {record.model.split('/').pop()}
                       </span>
                       <div className="flex items-center gap-3">
-                        <div className="flex items-baseline gap-2">
+                        <div className="flex flex-col items-end">
                           <span className="text-2xl font-headline font-extrabold text-on-surface tracking-tighter">
-                            ${record.price?.toFixed(0)}
+                            ${record.price?.toFixed(2)}
                           </span>
                           {record.changePercent !== undefined && (
-                            <span className={`text-sm font-bold whitespace-nowrap ${
+                            <span className={`text-[11px] font-bold whitespace-nowrap mt-0.5 ${
                               record.changePercent >= 0 
                                 ? (candleColorStyle === 'red-up' ? 'text-red-500' : 'text-green-500')
                                 : (candleColorStyle === 'red-up' ? 'text-green-500' : 'text-red-500')
                             }`}>
-                              ({record.changePercent >= 0 ? '+' : ''}{record.changePercent.toFixed(2)}%)
+                              {record.changePercent >= 0 ? '▲' : '▼'} {Math.abs(record.changePercent).toFixed(2)}%
                             </span>
                           )}
                         </div>
-                        <ChevronRight className="w-5 h-5 text-on-surface-variant/20 group-hover:text-primary transition-all group-hover:translate-x-1" />
+                        {!isEditMode && <ChevronRight className="w-5 h-5 text-on-surface-variant/20 group-hover:text-primary transition-all group-hover:translate-x-1" />}
                       </div>
                     </div>
-
-                    {/* Corner Delete Action */}
-                    <button 
-                      onClick={(e) => deleteOne(e, record.id)}
-                      className="absolute -right-4 -top-4 p-5 bg-error/10 text-error rounded-bl-3xl opacity-0 group-hover:opacity-100 group-hover:right-0 group-hover:top-0 transition-all active:scale-95 duration-300"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
                   </div>
                 </motion.div>
               );
@@ -178,6 +269,21 @@ export function HistoryTab({
           )}
         </div>
       </AnimatePresence>
+
+      <ConfirmModal
+        isOpen={isClearConfirmOpen}
+        onClose={() => setIsClearConfirmOpen(false)}
+        onConfirm={handleClear}
+        type="danger"
+        title={t('history.clear.confirm.title')}
+        message={
+          isEditMode && selectedIds.size < records.length
+            ? t('history.delete.confirm.selected').replace('{0}', selectedIds.size.toString())
+            : t('history.clear.confirm.message')
+        }
+        confirmLabel={t('history.clear.button')}
+        cancelLabel={t('common.cancel')}
+      />
     </motion.div>
   );
 }

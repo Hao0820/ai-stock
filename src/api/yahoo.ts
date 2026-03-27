@@ -64,32 +64,51 @@ export interface StockSuggestion {
 }
 
 export async function searchStockSuggestions(query: string, language: 'zh-TW' | 'en-US' = 'zh-TW'): Promise<StockSuggestion[]> {
-  if (!query || query.length < 2) return [];
+  if (!query || query.trim().length < 1) return [];
   try {
     const langParam = language === 'zh-TW' ? 'zh-Hant-TW' : 'en-US';
     const regionParam = language === 'zh-TW' ? 'TW' : 'US';
-    const res = await fetch(`/api/yahoo/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=5&newsCount=0&lang=${langParam}&region=${regionParam}`);
+    // Using v6 autocomplete for better localized search support
+    const res = await fetch(`/api/yahoo/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=${langParam}&region=${regionParam}`);
     if (!res.ok) return [];
+    
     const data = await res.json();
-    if (data.quotes && data.quotes.length > 0) {
-      return data.quotes.map((q: any) => ({
+    const suggestions = data.ResultSet?.Result || [];
+
+    if (suggestions.length > 0) {
+      return suggestions.map((q: any) => ({
         symbol: q.symbol,
-        shortname: q.longname || q.shortname || q.symbol,
-        exchDisp: q.exchDisp || q.exchange
+        shortname: q.name || q.symbol,
+        exchDisp: q.exchDisp || q.exch || ''
       }));
     }
   } catch (error) {
-    console.error('Error fetching suggestions:', error);
+    console.error('Error fetching suggestions (v6):', error);
   }
   return [];
 }
 
 /**
- * Check if a given stock symbol exists on Yahoo Finance using the chart API (avoids 429 rate limit of search API).
- * Returns the matched symbol (e.g., 'AAPL', '2330.TW') if found, otherwise null.
+ * Check if a given stock symbol exists or resolve a name to a symbol.
  */
 export async function searchStock(query: string, language: 'zh-TW' | 'en-US' = 'zh-TW'): Promise<string | null> {
-  const result = await fetchStockDetail(query, '1d', '1d', language);
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  // Detection: If query contains Non-ASCII (e.g., Chinese), it's likely a name
+  const isPlainSymbol = /^[A-Z0-9.]+$/i.test(trimmed);
+  
+  let targetSymbol = trimmed;
+
+  if (!isPlainSymbol) {
+    // Attempt name-to-symbol resolution via suggestions
+    const suggestions = await searchStockSuggestions(trimmed, language);
+    if (suggestions.length > 0) {
+      targetSymbol = suggestions[0].symbol;
+    }
+  }
+
+  const result = await fetchStockDetail(targetSymbol, '1d', '1d', language);
   return result ? result.symbol : null;
 }
 

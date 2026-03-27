@@ -56,7 +56,13 @@ export const enUS: Translations = {
   'history.sentiment.bullish': 'Bullish',
   'history.sentiment.bearish': 'Bearish',
   'history.sentiment.neutral': 'Neutral',
+  'history.sentiment.processing': 'Analyzing...',
   'history.sentiment.correction': 'Correction',
+  'history.clear.button': 'Delete Records',
+  'history.clear.confirm.title': 'Delete All History',
+  'history.clear.confirm.message': 'Are you sure you want to delete all locally stored analysis records?',
+  'history.delete.selected': 'Delete Selected ({0})',
+  'history.delete.confirm.selected': 'Are you sure you want to delete the {0} selected analysis records?',
 
   // Settings
   'settings.title': 'System Settings',
@@ -127,6 +133,7 @@ export const enUS: Translations = {
   'detail.analysis.levels': 'Strategic Levels',
   'detail.analysis.winRate': 'Win Rate',
   'detail.analysis.entry': 'Suggested Entry',
+  'detail.analysis.entryRange': 'Entry Range',
   'detail.analysis.exit': 'Target Exit',
   'detail.analysis.stopLoss': 'Stop Loss',
   'detail.analysis.takeProfit': 'Take Profit',
@@ -146,6 +153,7 @@ export const enUS: Translations = {
   'ai.multi.long.desc': 'The long-term strategic focus remains cementing the technological moat against global peers.',
 
   // Disclaimer
-  'disclaimer.title': 'Investment Advisory Disclaimer',
-  'disclaimer.desc': 'Some analytics rendered in this report are static previews for demonstration. Top price quotes and sub-charts reflect real market data. This interface is for reference only and does not constitute financial advice, solicitation, or invitation to trade.'
+  'disclaimer.title': 'Investment Advice Disclaimer',
+  'disclaimer.desc': 'Parts of this analysis report are currently generated through static previews; charts and top quotes are real market data. This is for reference only and does not constitute any form of investment advice, offer, or solicitation.',
+  'disclaimer.agreement': "By clicking 'Start Analysis', you acknowledge that you have read and agree to the disclaimer above."
 };

@@ -79,7 +79,11 @@ export const SentimentPieChart: React.FC<SentimentPieChartProps> = ({ sentiment,
             <span className="text-3xl font-headline font-extrabold text-on-surface">{Math.round(sentiment.positive * 100)}%</span>
           </div>
         </div>
-        <span className="text-3xl font-headline font-bold text-primary">{t('history.sentiment.bullish')}</span>
+        {(() => {
+          if (sentiment.positive >= 0.6) return <span className="text-3xl font-headline font-bold text-primary">{t('history.sentiment.bullish')}</span>;
+          if (sentiment.negative >= 0.4) return <span className="text-3xl font-headline font-bold text-error">{t('history.sentiment.bearish')}</span>;
+          return <span className="text-3xl font-headline font-bold text-secondary">{t('history.sentiment.neutral')}</span>;
+        })()}
       </div>
 
       <div className="grid grid-cols-1 gap-3 w-full">

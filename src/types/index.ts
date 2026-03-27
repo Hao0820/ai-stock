@@ -39,9 +39,9 @@ export interface AnalysisRecord {
   timestamp: number;
   price: number;
   changePercent: number;
-  analysis: AIAnalysis;
-  ohlcv: Record<string, any[]>; // Maps resolution to candles
-  indicators: Record<string, any>; // Technical indicators for the stock
+  analysis?: AIAnalysis;
+  ohlcv?: Record<string, any[]>; // Maps resolution to candles
+  indicators?: Record<string, any>; // Technical indicators for the stock
   model: string;
-  language: string;
+  language?: string;
 }

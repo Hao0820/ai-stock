@@ -9,6 +9,23 @@ const STORE_NAME = 'analyses';
  */
 export class AnalysisDB {
   private db: IDBDatabase | null = null;
+  private listeners: (() => void)[] = [];
+
+  /**
+   * Subscribe to database changes
+   * @param callback Function to call when data changes
+   * @returns Unsubscribe function
+   */
+  subscribe(callback: () => void): () => void {
+    this.listeners.push(callback);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== callback);
+    };
+  }
+
+  private notify() {
+    this.listeners.forEach(callback => callback());
+  }
 
   async init(): Promise<IDBDatabase> {
     if (this.db) return this.db;
@@ -40,7 +57,10 @@ export class AnalysisDB {
       const store = transaction.objectStore(STORE_NAME);
       const request = store.put(record);
 
-      request.onsuccess = () => resolve(record.id);
+      request.onsuccess = () => {
+        this.notify();
+        resolve(record.id);
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -80,7 +100,10 @@ export class AnalysisDB {
       const store = transaction.objectStore(STORE_NAME);
       const request = store.delete(id);
 
-      request.onsuccess = () => resolve();
+      request.onsuccess = () => {
+        this.notify();
+        resolve();
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -92,7 +115,10 @@ export class AnalysisDB {
       const store = transaction.objectStore(STORE_NAME);
       const request = store.clear();
 
-      request.onsuccess = () => resolve();
+      request.onsuccess = () => {
+        this.notify();
+        resolve();
+      };
       request.onerror = () => reject(request.error);
     });
   }
