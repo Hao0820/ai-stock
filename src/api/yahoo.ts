@@ -48,6 +48,16 @@ export interface ProcessedChartData {
   isUp: boolean; // Indicates if close >= open (true = red/Taiwan standard, false = green)
 }
 
+export interface StockFundamentals {
+  symbol: string;
+  assetProfile?: any;
+  financialData?: any;
+  defaultKeyStatistics?: any;
+  summaryDetail?: any;
+  recommendationTrend?: any;
+  earnings?: any;
+}
+
 export interface StockDetailResult {
   symbol: string;
   name: string;
@@ -55,6 +65,84 @@ export interface StockDetailResult {
   changeValue: number;
   changePercent: number;
   chartData: ProcessedChartData[];
+  fundamentals?: StockFundamentals;
+}
+
+/**
+ * Fetch fundamental data (P/E, ROE, Revenue Growth, etc.) from Yahoo Finance v10.
+ * Now includes a fallback to v7 quote API for more reliable basic metrics.
+ */
+export async function fetchStockFundamentals(symbol: string, language: 'zh-TW' | 'en-US' = 'zh-TW'): Promise<StockFundamentals | null> {
+  if (!symbol) return null;
+  const targetSymbol = symbol.trim().toUpperCase();
+  const modules = 'assetProfile,financialData,defaultKeyStatistics,summaryDetail,recommendationTrend,earnings';
+  
+  try {
+    const langParam = language === 'zh-TW' ? 'zh-Hant-TW' : 'en-US';
+    const regionParam = language === 'zh-TW' ? 'TW' : 'US';
+    
+    // Concurrent fetch for robustness
+    const [summaryRes, quoteRes] = await Promise.all([
+      fetch(`/api/yahoo/v10/finance/quoteSummary/${encodeURIComponent(targetSymbol)}?modules=${modules}&lang=${langParam}&region=${regionParam}`),
+      fetch(`/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(targetSymbol)}&lang=${langParam}&region=${regionParam}`)
+    ]);
+    
+    let result: any = null;
+    let quoteData: any = null;
+
+    if (summaryRes.ok) {
+      const summaryJson = await summaryRes.json();
+      result = summaryJson.quoteSummary?.result?.[0] || {};
+    }
+
+    if (quoteRes.ok) {
+      const quoteJson = await quoteRes.json();
+      quoteData = quoteJson.finance?.result?.[0] || {};
+    }
+
+    if (!result && !quoteData) return null;
+    
+    // Create base fundamentals
+    const fundamentals: StockFundamentals = {
+      symbol: targetSymbol,
+      assetProfile: result?.assetProfile,
+      financialData: result?.financialData || {},
+      defaultKeyStatistics: result?.defaultKeyStatistics || {},
+      summaryDetail: result?.summaryDetail || {},
+      recommendationTrend: result?.recommendationTrend || {},
+      earnings: result?.earnings || {}
+    };
+
+    // Fallback/Augmentation logic from quoteData
+    if (quoteData) {
+      // P/E Fallback
+      if (!fundamentals.summaryDetail.forwardPE && quoteData.forwardPE) {
+        fundamentals.summaryDetail.forwardPE = { raw: quoteData.forwardPE, fmt: String(quoteData.forwardPE) };
+      }
+      if (!fundamentals.summaryDetail.trailingPE && quoteData.trailingPE) {
+        fundamentals.summaryDetail.trailingPE = { raw: quoteData.trailingPE, fmt: String(quoteData.trailingPE) };
+      }
+      
+      // Recommendation Fallback
+      if (!fundamentals.financialData.recommendationKey && quoteData.averageAnalystRating) {
+        // Map "1.5 - Buy" to "buy"
+        const rating = quoteData.averageAnalystRating.toLowerCase();
+        if (rating.includes('buy')) fundamentals.financialData.recommendationKey = 'buy';
+        else if (rating.includes('sell')) fundamentals.financialData.recommendationKey = 'sell';
+        else if (rating.includes('hold')) fundamentals.financialData.recommendationKey = 'hold';
+      }
+
+      // Target Price Fallback
+      if (!fundamentals.financialData.targetMeanPrice && quoteData.targetPriceMean) {
+         fundamentals.financialData.targetMeanPrice = { raw: quoteData.targetPriceMean, fmt: String(quoteData.targetPriceMean) };
+      }
+    }
+
+    return fundamentals;
+  } catch (error) {
+    console.error(`[Yahoo] Error fetching fundamentals for ${targetSymbol}:`, error);
+    return null;
+  }
 }
 
 export interface StockSuggestion {
@@ -113,11 +201,25 @@ export async function searchStock(query: string, language: 'zh-TW' | 'en-US' = '
 }
 
 /**
+ * In-memory cache for stock detail results to prevent redundant API calls
+ */
+const stockCache: Record<string, { data: StockDetailResult, timestamp: number }> = {};
+const CACHE_TTL = 60 * 1000; // 1 minute cache
+
+/**
  * Fetch historical chart data and process technical indicators.
  */
 export async function fetchStockDetail(symbol: string, range: string = '1mo', interval: string = '1d', language: 'zh-TW' | 'en-US' = 'zh-TW'): Promise<StockDetailResult | null> {
   if (!symbol) return null;
   const targetSymbol = symbol.trim().toUpperCase();
+  const cacheKey = `${targetSymbol}_${range}_${interval}_${language}`;
+
+  // Check in-memory cache first
+  const cached = stockCache[cacheKey];
+  if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+    console.log(`[Yahoo] Returning cached data for ${cacheKey}`);
+    return cached.data;
+  }
   
   try {
     const langParam = language === 'zh-TW' ? 'zh-Hant-TW' : 'en-US';
@@ -131,10 +233,10 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
       return null;
     }
     
-    const result = data.chart.result[0];
-    const timestamps = result.timestamp;
-    const meta = result.meta;
-    const quote = (result.indicators.quote && result.indicators.quote[0]) ? result.indicators.quote[0] : {} as any;
+    const chartResult = data.chart.result[0];
+    const timestamps = chartResult.timestamp;
+    const meta = chartResult.meta;
+    const quote = (chartResult.indicators.quote && chartResult.indicators.quote[0]) ? chartResult.indicators.quote[0] : {} as any;
     
     // Validate if it's a dead/delisted stock that returns empty indicators
     if (!timestamps || timestamps.length === 0) {
@@ -223,7 +325,7 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
     const changeValue = price - prevClose;
     const changePercent = prevClose ? (changeValue / prevClose) * 100 : 0;
 
-    return {
+    const result: StockDetailResult = {
       symbol: meta.symbol,
       name: meta.shortName || meta.longName || meta.symbol,
       price: Number(price.toFixed(2)),
@@ -231,6 +333,11 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
       changePercent: Number(changePercent.toFixed(2)),
       chartData
     };
+
+    // Save to cache
+    stockCache[cacheKey] = { data: result, timestamp: Date.now() };
+
+    return result;
     
   } catch (error) {
     console.error('Error fetching chart data from Yahoo Finance:', error);
@@ -260,4 +367,12 @@ export async function fetchLocalizedNames(symbol: string): Promise<{ en: string,
     console.error('Error fetching localized names:', err);
     return { en: symbol, zh: symbol };
   }
+}
+
+/**
+ * Clears the in-memory stock cache (used during full reset)
+ */
+export function clearYahooCache(): void {
+  Object.keys(stockCache).forEach(key => delete stockCache[key]);
+  console.log('[Yahoo] Cache cleared');
 }

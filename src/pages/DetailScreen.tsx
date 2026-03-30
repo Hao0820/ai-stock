@@ -1,16 +1,37 @@
 import React, { useState, useEffect, useRef, useTransition, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Sparkles, TrendingUp, TrendingDown, BarChart3, BrainCircuit, Clock, Target, Rocket, Globe, ShieldAlert, Loader2, Settings, Newspaper, Banknote } from 'lucide-react';
-import { fetchStockDetail, StockDetailResult, ProcessedChartData, fetchLocalizedNames } from '../api/yahoo';
+import {
+  ArrowLeft,
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  BarChart3,
+  BrainCircuit,
+  Clock,
+  Target,
+  Rocket,
+  Globe,
+  ShieldAlert,
+  Loader2,
+  Settings,
+  Newspaper,
+  Banknote,
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  ShieldCheck,
+  ChevronRight
+} from 'lucide-react';
+import { fetchStockDetail, StockDetailResult, ProcessedChartData, fetchLocalizedNames, fetchStockFundamentals, StockFundamentals } from '../api/yahoo';
 import { analyzeStock, stripMarkdown } from '../api/ai';
 import { useTranslation } from '../contexts/LanguageContext';
-import { getCachedStockData, setCachedStockData } from '../utils/cache';
 import { createChart, ColorType, CrosshairMode, LineStyle, IChartApi, Time, SeriesMarker } from 'lightweight-charts';
 import { AIAnalysis } from '../types';
 import { SentimentPieChart } from '../components/SentimentPieChart';
+import { useChart, Resolution } from '../hooks/useChart';
 
 // --- Main Detail Screen ---
-type Resolution = 'D' | 'W' | 'M';
 
 export function DetailScreen({
   stock,
@@ -42,21 +63,30 @@ export function DetailScreen({
   const [isPending, startTransition] = useTransition();
   const [isSwitchingRes, setIsSwitchingRes] = useState(false);
 
-  const [dataStore, setDataStore] = useState<Record<Resolution, StockDetailResult | null>>({
+  const [dataStore, setDataStore] = useState<{
+    D: StockDetailResult | null;
+    W: StockDetailResult | null;
+    M: StockDetailResult | null;
+    fundamentals: StockFundamentals | null;
+  }>({
     D: null,
     W: null,
-    M: null
+    M: null,
+    fundamentals: null
   });
 
-  // Chart Container Refs
-  const mainChartRef = useRef<HTMLDivElement>(null);
-  const rsiChartRef = useRef<HTMLDivElement>(null);
-  const kdChartRef = useRef<HTMLDivElement>(null);
-  const macdChartRef = useRef<HTMLDivElement>(null);
-
-  // Custom Floating Tooltip State
-  const [tooltipData, setTooltipData] = useState<ProcessedChartData | null>(null);
-  const [chartDebugError, setChartDebugError] = useState<string | null>(null);
+  // Use Custom Hook for Chart Logic
+  const {
+    refs,
+    tooltipData,
+    chartDebugError
+  } = useChart({
+    stockDetail: dataStore[activeRes],
+    candleColorStyle,
+    isSwitchingRes,
+    isPending,
+    t
+  });
 
   // AI Analysis State
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
@@ -81,36 +111,17 @@ export function DetailScreen({
         return;
       }
 
-      // Live mode
-      // Check cache first for each resolution
-      const cachedD = getCachedStockData(stock, '2y', '1d');
-      const cachedW = getCachedStockData(stock, '10y', '1wk');
-      const cachedM = getCachedStockData(stock, 'max', '1mo');
-
-      if (cachedD && cachedW && cachedM) {
-        if (isMounted) {
-          setDataStore({ D: cachedD, W: cachedW, M: cachedM });
-          setIsLoading(false);
-        }
-        return;
-      }
-
       setIsLoading(true);
       try {
-        const [resD, resW, resM] = await Promise.all([
+        const [resD, resW, resM, resFunds] = await Promise.all([
           fetchStockDetail(stock, '2y', '1d', language),
           fetchStockDetail(stock, '10y', '1wk', language),
-          fetchStockDetail(stock, 'max', '1mo', language)
+          fetchStockDetail(stock, 'max', '1mo', language),
+          fetchStockFundamentals(stock, language)
         ]);
 
         if (isMounted) {
-          setDataStore({ D: resD, W: resW, M: resM });
-
-          // Save to cache
-          if (resD) setCachedStockData(stock, '2y', '1d', resD);
-          if (resW) setCachedStockData(stock, '10y', '1wk', resW);
-          if (resM) setCachedStockData(stock, 'max', '1mo', resM);
-
+          setDataStore({ D: resD, W: resW, M: resM, fundamentals: resFunds });
           setIsLoading(false);
         }
       } catch (err) {
@@ -209,7 +220,8 @@ export function DetailScreen({
           stockDetail?.indicators || {},
           key,
           modelId,
-          language as 'zh-TW' | 'en-US'
+          language as 'zh-TW' | 'en-US',
+          dataStore.fundamentals
         ).then(async (result) => {
           // Re-fetch current record state to avoid overwriting newer status if any
           const updatedRecord = {
@@ -253,167 +265,7 @@ export function DetailScreen({
     isDownColorHex = '#ef4444';
   }
 
-  // Effect to handle lightweight-charts initialization and syncing
-  useEffect(() => {
-    if (!stockDetail || !stockDetail.chartData || stockDetail.chartData.length === 0) return;
-    if (!mainChartRef.current || !rsiChartRef.current || !kdChartRef.current || !macdChartRef.current) return;
-    if (isSwitchingRes || isPending) return; // Don't draw while swapping
-
-    try {
-      const chartOptions: any = {
-        layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#cbd5e1', fontSize: 13 },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
-        crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(255,255,255,0.4)', width: 1 as const, style: LineStyle.Dashed }, horzLine: { color: 'rgba(255,255,255,0.4)', width: 1 as const, style: LineStyle.Dashed } },
-        rightPriceScale: {
-          borderVisible: false,
-          scaleMargins: { top: 0.1, bottom: 0.1 },
-          minimumWidth: 80, // Force consistent width for grid alignment
-        },
-        timeScale: { borderVisible: false, fixLeftEdge: true, fixRightEdge: true },
-        handleScroll: { mouseWheel: true, pressedMouseMove: true },
-        handleScale: { mouseWheel: true, pinch: true },
-      };
-
-      // 1. Initialize 4 Charts
-      const mainChart = createChart(mainChartRef.current, { ...chartOptions });
-      const rsiChart = createChart(rsiChartRef.current, { ...chartOptions });
-      const kdChart = createChart(kdChartRef.current, { ...chartOptions });
-      const macdChart = createChart(macdChartRef.current, { ...chartOptions });
-
-      // Ensure strict horizontal alignment
-      rsiChart.timeScale().applyOptions({ visible: false });
-      kdChart.timeScale().applyOptions({ visible: false });
-      mainChart.timeScale().applyOptions({ visible: false }); // MACD (bottom) shows time
-
-      // Prepare Data
-      const data = stockDetail.chartData.map(d => ({ ...d, time: d.originalTimestamp as Time })).sort((a, b) => (a.time as number) - (b.time as number));
-      // Remove duplicates based on time
-      const uniqueDataMap = new Map();
-      data.forEach(d => uniqueDataMap.set(d.time, d));
-      const uniqueData = Array.from(uniqueDataMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
-
-      // MAIN: Candlesticks
-      const candleSeries = mainChart.addCandlestickSeries({ upColor: isUpColorHex, downColor: isDownColorHex, borderVisible: false, wickUpColor: isUpColorHex, wickDownColor: isDownColorHex, lastValueVisible: false, priceLineVisible: false });
-      candleSeries.setData(uniqueData.map(d => ({ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close })));
-
-      // MAIN: MAs
-      const ma5Series = mainChart.addLineSeries({ color: '#eab308', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false });
-      ma5Series.setData(uniqueData.filter(d => d.ma5 !== null).map(d => ({ time: d.time, value: d.ma5! })));
-      const ema12Series = mainChart.addLineSeries({ color: '#3b82f6', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false });
-      ema12Series.setData(uniqueData.filter(d => d.ema12 !== null).map(d => ({ time: d.time, value: d.ema12! })));
-
-      const bbUpperSeries = mainChart.addLineSeries({ color: 'rgba(255,255,255,0.3)', lineStyle: LineStyle.Dashed, lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false });
-      bbUpperSeries.setData(uniqueData.filter(d => d.bbUpper !== null).map(d => ({ time: d.time, value: d.bbUpper! })));
-      const bbLowerSeries = mainChart.addLineSeries({ color: 'rgba(255,255,255,0.3)', lineStyle: LineStyle.Dashed, lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false });
-      bbLowerSeries.setData(uniqueData.filter(d => d.bbLower !== null).map(d => ({ time: d.time, value: d.bbLower! })));
-
-      // RSI
-      const rsiSeries = rsiChart.addLineSeries({ color: '#c084fc', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      rsiSeries.setData(uniqueData.filter(d => d.rsi14 !== null).map(d => ({ time: d.time, value: d.rsi14! })));
-      rsiSeries.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
-
-      // KD
-      const kSeries = kdChart.addLineSeries({ color: '#fb923c', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      kSeries.setData(uniqueData.filter(d => d.k9 !== null).map(d => ({ time: d.time, value: d.k9! })));
-      const dSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      dSeries.setData(uniqueData.filter(d => d.d9 !== null).map(d => ({ time: d.time, value: d.d9! })));
-      kSeries.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
-
-      // MACD
-      const macdSeries = macdChart.addLineSeries({ color: '#e11d48', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      macdSeries.setData(uniqueData.filter(d => d.macdLine !== null).map(d => ({ time: d.time, value: d.macdLine! })));
-      const signalSeries = macdChart.addLineSeries({ color: '#0d9488', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      signalSeries.setData(uniqueData.filter(d => d.macdSignal !== null).map(d => ({ time: d.time, value: d.macdSignal! })));
-      const histogramSeries = macdChart.addHistogramSeries({ color: '#ef4444', lastValueVisible: false, priceLineVisible: false });
-      histogramSeries.setData(uniqueData.filter(d => d.macdHist !== null).map(d => ({
-        time: d.time,
-        value: d.macdHist!,
-        color: d.macdHist! >= 0 ? isUpColorHex : isDownColorHex
-      })));
-
-      // Syncing TimeRange & Crosshairs
-      const charts = [mainChart, rsiChart, kdChart, macdChart];
-
-      // Fit content and Zoom to last 100 bars
-      mainChart.timeScale().fitContent();
-      const lastIndex = uniqueData.length;
-      mainChart.timeScale().setVisibleLogicalRange({
-        from: lastIndex - 30,
-        to: lastIndex + 2, // Small buffer at end
-      });
-
-      let isSyncing = false;
-
-      const syncCharts = (sourceChart: IChartApi, handlerName: 'subscribeVisibleTimeRangeChange' | 'subscribeCrosshairMove', dataProp: any) => {
-        if (isSyncing) return;
-        isSyncing = true;
-        charts.forEach(targetChart => {
-          if (targetChart !== sourceChart) {
-            if (handlerName === 'subscribeVisibleTimeRangeChange') {
-              targetChart.timeScale().setVisibleRange(dataProp);
-            } else if (handlerName === 'subscribeCrosshairMove') {
-              if (dataProp.time) {
-                targetChart.setCrosshairPosition(dataProp.price, dataProp.time, getFirstSeries(targetChart));
-              } else {
-                targetChart.clearCrosshairPosition();
-              }
-            }
-          }
-        });
-        isSyncing = false;
-      };
-
-      const getFirstSeries = (chart: IChartApi): any => {
-        if (chart === mainChart) return candleSeries;
-        if (chart === rsiChart) return rsiSeries;
-        if (chart === kdChart) return kSeries;
-        if (chart === macdChart) return histogramSeries;
-      };
-
-      charts.forEach(chart => {
-        chart.timeScale().subscribeVisibleTimeRangeChange(range => {
-          if (range) syncCharts(chart, 'subscribeVisibleTimeRangeChange', range);
-        });
-        chart.subscribeCrosshairMove(param => {
-          if (param.time === undefined || param.point === undefined || param.point.x < 0 || param.point.y < 0) {
-            setTooltipData(null);
-            syncCharts(chart, 'subscribeCrosshairMove', { time: null });
-          } else {
-            // Find matching data for our Tooltip
-            const matchedData = uniqueData.find(d => d.time === param.time);
-            if (matchedData) setTooltipData(matchedData as ProcessedChartData);
-
-            let yPrice = param.seriesData.get(getFirstSeries(chart));
-            let resolvedPrice = 0;
-            if (yPrice) {
-              if (typeof yPrice === 'number') resolvedPrice = yPrice;
-              else if ('value' in yPrice) resolvedPrice = (yPrice as any).value;
-              else if ('close' in yPrice) resolvedPrice = (yPrice as any).close;
-            }
-            syncCharts(chart, 'subscribeCrosshairMove', { time: param.time, price: resolvedPrice });
-          }
-        });
-      });
-
-      // Resize Observer
-      const handleResize = () => {
-        if (!mainChartRef.current) return;
-        charts.forEach((c, idx) => {
-          const container = [mainChartRef, rsiChartRef, kdChartRef, macdChartRef][idx].current;
-          if (container) c.applyOptions({ width: container.clientWidth });
-        });
-      };
-      window.addEventListener('resize', handleResize);
-
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        charts.forEach(c => c.remove());
-      };
-    } catch (err: any) {
-      console.error(err);
-      setChartDebugError(err.toString());
-    }
-  }, [stockDetail, candleColorStyle, isSwitchingRes, isPending]);
+  // Chart initialization removed and moved to useChart hook
 
   return (
     <div className="min-h-screen bg-surface pb-40">
@@ -564,101 +416,235 @@ export function DetailScreen({
 
                 <div className="w-full flex-grow flex flex-col gap-[2px]">
                   <div className="relative w-full" style={{ flex: 45 }}>
-                    <div ref={mainChartRef} className="w-full h-full" />
+                    <div ref={refs.mainChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full" style={{ flex: 15 }}>
                     <span className="absolute left-2 top-0 text-xs font-bold text-purple-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.rsi')}</span>
-                    <div ref={rsiChartRef} className="w-full h-full" />
+                    <div ref={refs.rsiChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full" style={{ flex: 15 }}>
                     <span className="absolute left-2 top-0 text-xs font-bold text-orange-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.kd')}</span>
-                    <div ref={kdChartRef} className="w-full h-full" />
+                    <div ref={refs.kdChartRef} className="w-full h-full" />
                   </div>
                   <div className="relative w-full pb-4" style={{ flex: 25 }}>
                     <span className="absolute left-2 top-0 text-xs font-bold text-rose-400 opacity-70 z-10 pointer-events-none">{t('detail.indicator.macd')}</span>
-                    <div ref={macdChartRef} className="w-full h-full" />
+                    <div ref={refs.macdChartRef} className="w-full h-full" />
                   </div>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* 1. Strategic Entry/Exit */}
-          <section className="w-full animate-in fade-in slide-in-from-bottom-8 duration-700 delay-75">
-            <div className="bg-primary/5 border border-primary/20 rounded-3xl p-8 shadow-xl relative overflow-hidden group">
-              <div className="absolute -right-4 -top-4 opacity-5 group-hover:scale-110 transition-transform duration-500">
-                <Target className="w-32 h-32 text-primary" />
-              </div>
-              {isAiLoading ? (
-                <div className="animate-pulse space-y-6">
-                  <div className="w-1/3 h-6 bg-primary/20 rounded"></div>
-                  <div className="grid grid-cols-3 gap-4">
-                    {[1, 2, 3].map(i => <div key={i} className="h-16 bg-primary/10 rounded-2xl"></div>)}
-                  </div>
+          {/* Tactical & Strategy Overview */}
+          <section className="w-full bg-surface-container rounded-[2.5rem] p-8 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-75">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
+                  <Target className="w-7 h-7 text-primary" />
                 </div>
-              ) : aiAnalysis ? (
-                <div className="relative z-10">
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                      <Banknote className="w-6 h-6 text-primary" />
-                    </div>
-                    <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.analysis.levels')}</h3>
+                <div>
+                  <h3 className="font-headline text-2xl font-black text-on-surface tracking-tight">戰術與策略總覽</h3>
+                </div>
+              </div>
+
+              <div className="flex bg-surface-container-high/50 p-1.5 rounded-2xl self-start md:self-auto border border-white/5 backdrop-blur-sm shadow-inner">
+                {(['short', 'medium', 'long'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setAiTab(tab)}
+                    className={`px-8 py-2.5 text-xs font-black rounded-xl transition-all uppercase tracking-widest ${aiTab === tab ? 'bg-primary text-on-primary shadow-[0_0_20px_rgba(78,222,163,0.3)]' : 'text-on-surface-variant hover:text-on-surface'}`}
+                  >
+                    {t(`ai.multi.tab.${tab}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {isAiLoading ? (
+              <div className="animate-pulse space-y-6">
+                <div className="h-80 bg-on-surface/5 rounded-3xl border border-white/5"></div>
+              </div>
+            ) : aiAnalysis ? (
+              <div className="flex flex-col gap-8">
+                {/* Financial Badges (Metrics) */}
+                {aiAnalysis.metrics && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    {[
+                      { key: 'pe', label: t('detail.analysis.pe'), val: aiAnalysis.metrics.pe, format: (v: number) => `${v.toFixed(1)}x`, icon: Banknote },
+                      { key: 'roe', label: t('detail.analysis.roe'), val: aiAnalysis.metrics.roe, format: (v: number) => `${v.toFixed(1)}%`, icon: Activity },
+                      { key: 'revenueGrowth', label: t('detail.analysis.revenueGrowth'), val: aiAnalysis.metrics.revenueGrowth, format: (v: number) => `${v.toFixed(1)}%`, icon: TrendingUp, color: aiAnalysis.metrics.revenueGrowth && aiAnalysis.metrics.revenueGrowth > 0 ? 'text-red-400' : 'text-green-400' },
+                      { key: 'analystTarget', label: t('detail.analysis.analystTarget'), val: aiAnalysis.metrics.analystTarget, format: (v: number) => `$${v.toFixed(1)}`, icon: Target },
+                      { key: 'shortPercentOfFloat', label: t('detail.analysis.shortInterest'), val: aiAnalysis.metrics.shortPercentOfFloat, format: (v: number) => `${v.toFixed(1)}%`, icon: ShieldAlert, color: aiAnalysis.metrics.shortPercentOfFloat && aiAnalysis.metrics.shortPercentOfFloat > 10 ? 'text-orange-400' : 'text-on-surface' },
+                      { key: 'recommendationKey', label: t('detail.analysis.recommendation'), val: aiAnalysis.metrics.recommendationKey, format: (v: string) => v.toUpperCase(), icon: Rocket, color: 'text-primary' }
+                    ].map((m, idx) => (
+                      <div key={idx} className="bg-surface-container-low/40 backdrop-blur-md p-4 rounded-[1.5rem] border border-white/5 flex flex-col items-center justify-center group hover:bg-surface-container-high/60 transition-all duration-300 shadow-sm relative overflow-hidden">
+                        <m.icon className="w-4 h-4 text-on-surface-variant/30 mb-2 group-hover:text-primary/50 transition-colors" />
+                        <span className="text-[9px] text-on-surface-variant font-black uppercase tracking-widest mb-1 opacity-60 text-center">{m.label}</span>
+                        <span className={`text-base font-headline font-black tracking-tight ${m.color || 'text-on-surface'}`}>
+                          {m.val !== undefined && m.val !== null ? m.format(m.val as never) : '--'}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-12 py-12 border-y border-white/5 items-center mb-10">
-                    {/* Row 1: Entry and Win Rate */}
-                    <div className="space-y-2 text-center">
-                      <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.entryRange')}</p>
-                      <p className="text-2xl md:text-4xl font-headline font-bold text-on-surface">
-                        {(() => {
-                          if (!aiAnalysis.entryPrice) return 'N/A';
-                          // Try to format range like "88-92" to "88.00 - 92.00"
-                          return aiAnalysis.entryPrice.replace(/([0-9.]+)/g, (match) => {
-                            const val = parseFloat(match);
-                            return isNaN(val) ? match : val.toFixed(2);
-                          });
-                        })()}
+                )}
+
+                <div className="flex flex-col lg:flex-row gap-8">
+                  {/* Left Sidebar: Direction & Risk */}
+                  <div className="lg:w-48 shrink-0 flex flex-col py-8 px-4 bg-primary/5 border border-primary/10 rounded-[2.5rem] relative overflow-hidden text-center shadow-inner group transition-all duration-300">
+                    <div className="absolute -top-4 -right-4 p-4 opacity-5 group-hover:opacity-10 transition-opacity translate-y-2 translate-x-2">
+                      {aiAnalysis.recommendation.toLowerCase().includes('buy') ? (
+                        <TrendingUp className="w-32 h-32 text-red-500" />
+                      ) : aiAnalysis.recommendation.toLowerCase().includes('sell') ? (
+                        <TrendingDown className="w-32 h-32 text-green-500" />
+                      ) : (
+                        <BrainCircuit className="w-32 h-32 text-primary" />
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-center mb-6">
+                      <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] mb-3 opacity-60">{t('detail.analysis.direction')}</span>
+                      <div className={`text-4xl font-black tracking-tighter ${aiAnalysis.recommendation.toLowerCase().includes('buy') ? 'text-red-500' :
+                        aiAnalysis.recommendation.toLowerCase().includes('sell') ? 'text-green-500' : 'text-yellow-500'
+                        }`}>
+                        {aiAnalysis.recommendation.toLowerCase().includes('buy') ? (language === 'zh-TW' ? '做多' : 'LONG') :
+                          aiAnalysis.recommendation.toLowerCase().includes('sell') ? (language === 'zh-TW' ? '做空' : 'SHORT') :
+                            (language === 'zh-TW' ? '觀望' : 'WAIT')}
+                      </div>
+                    </div>
+
+                    {/* Risk Level Badge */}
+                    <div className="mb-6 pt-4 border-t border-primary/10">
+                      <span className="text-[10px] font-black text-on-surface-variant uppercase tracking-[0.2em] mb-3 block opacity-60">{t('detail.analysis.risk')}</span>
+                      {(() => {
+                        const r = aiAnalysis.timelines?.[aiTab]?.riskLevel || 'Medium';
+                        const colorClass = r === 'High' ? 'text-red-400 bg-red-400/10' : r === 'Low' ? 'text-primary bg-primary/10' : 'text-yellow-400 bg-yellow-400/10';
+                        const RiskIcon = r === 'High' ? AlertTriangle : r === 'Low' ? ShieldCheck : Info;
+                        return (
+                          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/5 font-black text-xs ${colorClass}`}>
+                            <RiskIcon className="w-3.5 h-3.5" />
+                            {t(`detail.analysis.risk.${r.toLowerCase() as 'low' | 'medium' | 'high'}`)}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="text-xs text-on-surface opacity-70 italic leading-relaxed font-medium">
+                      "{stripMarkdown(aiAnalysis.summary)}"
+                    </div>
+                  </div>
+
+                  {/* Right Content: Tactical Levels & Strategy Preview */}
+                  <div className="flex-grow flex flex-col gap-6">
+                    {/* 2x2 Tactical Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Entry Box */}
+                      <div className="bg-surface-container-high/40 backdrop-blur-sm p-6 rounded-[2rem] border border-white/5 group hover:border-primary/20 transition-all duration-300 shadow-lg flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[11px] text-on-surface-variant font-black uppercase tracking-widest opacity-60">{t('detail.analysis.entryRange')}</span>
+                          <Rocket className="w-4 h-4 text-on-surface-variant/20 group-hover:text-primary/40" />
+                        </div>
+                        <p className="text-xl md:text-2xl font-headline font-black text-on-surface tracking-tight truncate">
+                          {(() => {
+                            const val = aiAnalysis.timelines?.[aiTab]?.entry || aiAnalysis.entryPrice;
+                            if (!val) return 'N/A';
+                            const match = val.match(/[0-9.]+(?:-[0-9.]+)?/);
+                            const clean = match ? match[0] : val;
+                            return clean.replace(/([0-9.]+)/g, m => isNaN(parseFloat(m)) ? m : parseFloat(m).toFixed(2));
+                          })()}
+                        </p>
+                      </div>
+
+                      {/* Win Rate Box */}
+                      <div className="bg-surface-container-high/40 backdrop-blur-sm p-6 rounded-[2rem] border border-white/5 group hover:border-secondary/20 transition-all duration-300 shadow-lg flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-[11px] text-on-surface-variant font-black uppercase tracking-widest opacity-60">{t('detail.analysis.winRate')}</span>
+                          <Activity className="w-4 h-4 text-on-surface-variant/20 group-hover:text-secondary/40" />
+                        </div>
+                        <p className="text-xl md:text-2xl font-headline font-black text-secondary tracking-tight">
+                          {aiAnalysis.timelines?.[aiTab]?.winRate || aiAnalysis.winRate || 0}%
+                        </p>
+                      </div>
+
+                      {(() => {
+                        const isRedUp = t('settings.candle.up') === '漲';
+                        const upColorClass = isRedUp ? 'text-red-500' : 'text-green-500';
+                        const downColorClass = isRedUp ? 'text-green-500' : 'text-red-500';
+                        const timeline = aiAnalysis.timelines?.[aiTab];
+
+                        const cleanPrice = (p: string) => {
+                          const match = p.match(/[0-9.]+(?:-[0-9.]+)?/);
+                          const clean = match ? match[0] : p;
+                          return clean.replace(/([0-9.]+)/g, m => isNaN(parseFloat(m)) ? m : parseFloat(m).toFixed(2));
+                        };
+
+                        if (timeline) {
+                          return (
+                            <>
+                              <div className="bg-surface-container-high/40 backdrop-blur-sm p-6 rounded-[2rem] border border-white/5 group hover:border-red-500/20 transition-all duration-300 shadow-lg flex flex-col justify-between">
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className="text-[11px] text-on-surface-variant font-black uppercase tracking-widest opacity-60">{t('detail.analysis.stopLoss')}</span>
+                                  <TrendingDown className={`w-4 h-4 opacity-20 group-hover:opacity-40 ${downColorClass}`} />
+                                </div>
+                                <p className={`text-xl md:text-2xl font-headline font-black tracking-tight ${downColorClass}`}>
+                                  {cleanPrice(timeline.stopLoss)}
+                                </p>
+                              </div>
+                              <div className="bg-surface-container-high/40 backdrop-blur-sm p-6 rounded-[2rem] border border-white/5 group hover:border-green-500/20 transition-all duration-300 shadow-lg flex flex-col justify-between">
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className="text-[11px] text-on-surface-variant font-black uppercase tracking-widest opacity-60">{t('detail.analysis.takeProfit')}</span>
+                                  <TrendingUp className={`w-4 h-4 opacity-20 group-hover:opacity-40 ${upColorClass}`} />
+                                </div>
+                                <p className={`text-xl md:text-2xl font-headline font-black tracking-tight ${upColorClass}`}>
+                                  {cleanPrice(timeline.target)}
+                                </p>
+                              </div>
+                            </>
+                          );
+                        }
+
+                        return null;
+                      })()}
+                    </div>
+
+                    {/* Highlights List (New) */}
+                    {aiAnalysis.timelines?.[aiTab]?.highlights && (
+                      <div className="p-6 bg-surface-container-low/50 rounded-[2rem] border border-white/5 shadow-inner">
+                        <div className="flex items-center gap-2 mb-4 opacity-50">
+                          <CheckCircle2 className="w-4 h-4 text-primary" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-on-surface">
+                            {t('detail.analysis.highlights')}
+                          </span>
+                        </div>
+                        <ul className="space-y-3">
+                          {aiAnalysis.timelines?.[aiTab]?.highlights.map((h, i) => (
+                            <li key={i} className="flex items-start gap-3 group">
+                              <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary/40 group-hover:bg-primary transition-colors shrink-0" />
+                              <span className="text-sm text-on-surface-variant font-medium leading-relaxed group-hover:text-on-surface transition-colors">
+                                {stripMarkdown(h)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Bottom Strategy Description */}
+                    <div className="p-8 bg-surface-container-low rounded-[2rem] border border-white/5 shadow-inner">
+                      <div className="flex items-center gap-2 mb-4 opacity-50">
+                        <Clock className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">
+                          {t(`ai.multi.tab.${aiTab}`)} {language === 'zh-TW' ? '策略與風險評核' : 'Tactics & Risk Assessment'}
+                        </span>
+                      </div>
+                      <p className="text-base text-on-surface-variant leading-relaxed whitespace-pre-wrap font-medium">
+                        {stripMarkdown(aiAnalysis.timelines?.[aiTab]?.description || (aiTab === 'short' ? aiAnalysis.shortTerm : aiTab === 'medium' ? aiAnalysis.mediumTerm : aiAnalysis.longTerm) || '')}
                       </p>
                     </div>
-                    <div className="space-y-2 text-center">
-                      <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.winRate')}</p>
-                      <p className="text-2xl md:text-4xl font-headline font-bold text-primary">{aiAnalysis.winRate || 0}%</p>
-                    </div>
-
-                    {/* Row 2: Stop Loss and Take Profit */}
-                    {(() => {
-                      const exitParts = (aiAnalysis.exitPrice || '').split(/[/|-]/);
-                      const p1 = parseFloat(exitParts[0]?.replace(/[^0-9.]/g, '') || '0');
-                      const p2 = parseFloat(exitParts[1]?.replace(/[^0-9.]/g, '') || '0');
-
-                      // For a long (buy) position, lower is stop loss, higher is take profit
-                      const values = [p1, p2].filter(v => v > 0).sort((a, b) => a - b);
-                      const slVal = values[0] || 0;
-                      const tpVal = values[1] || p1 || 0;
-
-                      const isRedUp = t('settings.candle.up') === '漲';
-                      const upColorClass = isRedUp ? 'text-red-400' : 'text-green-400';
-                      const downColorClass = isRedUp ? 'text-green-400' : 'text-red-400';
-
-                      return (
-                        <>
-                          <div className="space-y-2 text-center">
-                            <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.stopLoss')}</p>
-                            <p className={`text-2xl md:text-4xl font-headline font-bold ${downColorClass}`}>{slVal.toFixed(2)}</p>
-                          </div>
-                          <div className="space-y-2 text-center">
-                            <p className="text-sm md:text-base text-on-surface-variant uppercase font-bold tracking-widest">{t('detail.analysis.takeProfit')}</p>
-                            <p className={`text-2xl md:text-4xl font-headline font-bold ${upColorClass}`}>{tpVal.toFixed(2)}</p>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                  <div className="bg-surface-container-low p-6 rounded-2xl border border-white/5">
-                    <p className="text-base leading-relaxed text-on-surface/80 italic text-center">"{stripMarkdown(aiAnalysis.summary)}"</p>
                   </div>
                 </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </section>
 
           {/* 2. Integrated News Sentiment Analysis */}
@@ -667,7 +653,7 @@ export function DetailScreen({
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
                 <Newspaper className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="font-headline text-xl font-bold text-on-surface">新聞情緒深度分析</h3>
+              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.analysis.newsTitle')}</h3>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-stretch">
@@ -689,38 +675,6 @@ export function DetailScreen({
                   </div>
                 ) : null}
               </div>
-            </div>
-          </section>
-
-          {/* 3. Planning Timeline */}
-          <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Clock className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.timeline.title')}</h3>
-              </div>
-              <div className="flex bg-surface-container-high p-1.5 rounded-2xl self-start md:self-auto">
-                {(['short', 'medium', 'long'] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setAiTab(tab)}
-                    className={`px-6 py-2 text-xs font-bold rounded-xl transition-all ${aiTab === tab ? 'bg-primary text-on-primary shadow-lg' : 'text-on-surface-variant hover:text-on-surface'}`}
-                  >
-                    {t(`ai.multi.tab.${tab}`)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="bg-surface-container-low p-8 rounded-2xl border border-white/5 min-h-[100px] flex items-center">
-              {isAiLoading ? (
-                <div className="w-full h-12 bg-on-surface/5 rounded-xl animate-pulse" />
-              ) : aiAnalysis ? (
-                <p className="text-base text-on-surface-variant leading-relaxed whitespace-pre-wrap">
-                  {stripMarkdown(aiTab === 'short' ? aiAnalysis.shortTerm : aiTab === 'medium' ? aiAnalysis.mediumTerm : aiAnalysis.longTerm)}
-                </p>
-              ) : null}
             </div>
           </section>
 

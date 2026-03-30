@@ -120,9 +120,21 @@ body {
 }
 
 /* Hide TradingView Watermark in lightweight-charts */
-.tv-lightweight-charts-canvas-box + div > a,
+.tv-lightweight-charts-canvas-box+div>a,
 #tv-attr-logo,
 a[href*="tradingview.com"] {
   display: none !important;
 }
 
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--outline-variant);
+  border-radius: 10px;
+}

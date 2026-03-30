@@ -8,26 +8,49 @@ export interface HistoryRecord {
   sentiment: 'Bullish' | 'Bearish' | 'Neutral' | 'Correction';
 }
 
+export interface TimelineStrategy {
+  description: string;
+  highlights?: string[];
+  entry: string;
+  target: string;
+  stopLoss: string;
+  winRate: number;
+  riskLevel?: 'Low' | 'Medium' | 'High';
+}
+
 export interface AIAnalysis {
   recommendation: string; // "Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"
   confidence: number; // 0-100
-  targetPrice: string; // $1200 or Range
+  targetPrice?: string; // $1200 or Range (Root target)
   sentiment: { 
     positive: number; // 0-1
     neutral: number; // 0-1
     negative: number; // 0-1
   };
-  shortTerm: string;
-  mediumTerm: string;
-  longTerm: string;
   summary: string;
-  // Strategic Fields
-  entryPrice?: string;
-  exitPrice?: string;
-  winRate?: number;
+  
+  // New Nested Tactical Structure
+  timelines?: {
+    short: TimelineStrategy;
+    medium: TimelineStrategy;
+    long: TimelineStrategy;
+  };
+
+  // Analysis Domains
   fundamentalSummary?: string;
   newsSummary?: string;
   trendSummary?: string;
+
+  // Real-time Fundamentals (Optional snapshot)
+  metrics?: {
+    pe?: number;
+    forwardPe?: number;
+    roe?: number;
+    revenueGrowth?: number;
+    analystTarget?: number;
+    recommendationKey?: string;
+    shortPercentOfFloat?: number;
+  };
 }
 
 export interface AnalysisRecord {

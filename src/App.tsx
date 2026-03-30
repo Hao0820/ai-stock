@@ -11,7 +11,7 @@ import { SettingsScreen } from './pages/SettingsScreen';
 import { DetailScreen } from './pages/DetailScreen';
 import { useTranslation } from './contexts/LanguageContext';
 import { useHistory } from './hooks/useHistory';
-import { clearAllStockCache } from './utils/cache';
+import { clearYahooCache } from './api/yahoo';
 
 export default function App() {
   const [hasVisited, setHasVisited] = useState<boolean>(() => {
@@ -50,16 +50,16 @@ export default function App() {
     try {
       const saved = localStorage.getItem('ai-stock-keys');
       const parsed = saved ? JSON.parse(saved) : { google: '', openai: '', claude: '' };
-      
+
       // Sanitization: Ensure it's an object with the expected keys
       if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
         return { google: '', openai: '', claude: '' };
       }
-      
+
       const cleanKey = (key: any, provider: string) => {
         if (typeof key !== 'string') return '';
         let k = key.trim();
-        
+
         // Detection: If a single field contains multiple distinct key patterns, it's corrupted
         const patterns = [/AIzaSy[A-Za-z0-9_-]+/, /sk-[A-Za-z0-9]{40,}/, /ant-api[A-Za-z0-9_-]{50,}/];
         let matchCount = 0;
@@ -75,16 +75,16 @@ export default function App() {
 
         // Specific Extraction
         if (provider === 'google') {
-           const match = k.match(/AIzaSy[A-Za-z0-9_-]{33,45}/);
-           return match ? match[0] : '';
+          const match = k.match(/AIzaSy[A-Za-z0-9_-]{33,45}/);
+          return match ? match[0] : '';
         } else if (provider === 'openai') {
-           const match = k.match(/sk-[A-Za-z0-9]{40,60}/);
-           return match ? match[0] : '';
+          const match = k.match(/sk-[A-Za-z0-9]{40,60}/);
+          return match ? match[0] : '';
         } else if (provider === 'claude') {
-           const match = k.match(/ant-api[A-Za-z0-9_-]{80,}/);
-           return match ? match[0] : '';
+          const match = k.match(/ant-api[A-Za-z0-9_-]{80,}/);
+          return match ? match[0] : '';
         }
-        
+
         return k;
       };
 
@@ -103,11 +103,11 @@ export default function App() {
     try {
       const saved = localStorage.getItem('ai-stock-models');
       const parsed = saved ? JSON.parse(saved) : {};
-      
+
       // Auto-Sanitization: Purge non-text models but ALLOW preview/exp for latest Gemini
       const excluded = ['embedding', 'audio', 'live', 'robot', 'tts', 'vision', 'image', 'search'];
       const sanitized: Record<string, { id: string, name: string }[]> = {};
-      
+
       Object.keys(parsed).forEach(provider => {
         if (Array.isArray(parsed[provider])) {
           sanitized[provider] = parsed[provider].filter((m: any) => {
@@ -190,7 +190,7 @@ export default function App() {
     localStorage.removeItem('ai-stock-visited');
     clearHistory();
     import('./utils/db').then(m => m.analysisDb.clearAll());
-    clearAllStockCache();
+    clearYahooCache();
 
     setHasVisited(false);
     showToast(t('common.toast.success.updated'), 'success');
@@ -315,7 +315,7 @@ export default function App() {
           >
             <div className="bg-surface-container-high/80 backdrop-blur-xl border border-outline-variant/20 rounded-2xl p-4 shadow-2xl flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${toast.type === 'success' ? 'bg-primary/20 text-primary' :
-                  toast.type === 'error' ? 'bg-error/20 text-error' : 'bg-secondary/20 text-secondary'
+                toast.type === 'error' ? 'bg-error/20 text-error' : 'bg-secondary/20 text-secondary'
                 }`}>
                 {toast.type === 'success' && <CheckCircle2 className="w-5 h-5" />}
                 {toast.type === 'error' && <XCircle className="w-5 h-5" />}
