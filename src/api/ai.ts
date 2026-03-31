@@ -1,59 +1,48 @@
 import { AIAnalysis } from '../types';
-import { GoogleGenAI } from '@google/genai';
+import { geminiProvider } from './providers/gemini';
+import { openaiProvider } from './providers/openai';
+import { claudeProvider } from './providers/claude';
+import { deepseekProvider } from './providers/deepseek';
+import { AIProvider } from './providers/base';
 
 /**
- * Call AI models (Google/OpenAI/Groq compatible)
+ * Returns the appropriate provider implementation
+ */
+function getProvider(providerName: string): AIProvider {
+  switch (providerName.toLowerCase()) {
+    case 'google':
+    case 'gemini':
+      return geminiProvider;
+    case 'openai':
+      return openaiProvider;
+    case 'claude':
+    case 'anthropic':
+      return claudeProvider;
+    case 'deepseek':
+      return deepseekProvider;
+    default:
+      return geminiProvider;
+  }
+}
+
+/**
+ * Call AI models through the provider system
  */
 async function callAi(prompt: string, apiKey: string, model: string): Promise<string> {
-  const isGoogle = model.includes('gemini');
-
-  if (isGoogle) {
-    const ai = new GoogleGenAI({ apiKey });
-    const isG2 = model.includes('gemini-2.0') || model.includes('gemini-experimental') || model.includes('gemini-3');
-
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        temperature: 0.7,
-        topP: 0.8,
-        topK: 40,
-        maxOutputTokens: 4096,
-        // Enable live Google Search for 2.0+ models
-        tools: isG2 ? [{ googleSearch: {} } as any] : undefined
-      }
-    });
-
-    return response.text || '';
-  } else {
-    // OpenAI or other standard API
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7
-      })
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(errorData.error?.message || 'AI Request failed');
-    }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
-  }
+  // Simple heuristic for provider
+  const providerName = model.includes('gemini') ? 'google' : 
+                      model.includes('gpt') || model.includes('o1') ? 'openai' : 
+                      model.includes('claude') ? 'claude' : 
+                      model.includes('deepseek') ? 'deepseek' : 'google';
+  
+  const provider = getProvider(providerName);
+  return provider.generateContent(prompt, apiKey, model);
 }
 
 /**
  * Extracts JSON from potential markdown code blocks
  */
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/{[\s\S]*}/);
   return jsonMatch ? jsonMatch[1] || jsonMatch[0] : text;
 }
@@ -72,7 +61,7 @@ export function stripMarkdown(text: string): string {
 }
 
 /**
- * Single-pass master analysis with Fundamental and Timeline support
+ * Master analysis function
  */
 export async function analyzeStock(
   symbol: string,
@@ -86,7 +75,6 @@ export async function analyzeStock(
   fundamentals?: any
 ): Promise<AIAnalysis> {
   const isZh = language === 'zh-TW';
-
   const marketContext = isZh ? '台灣市場 (Taiwan Market)' : 'Global Market';
   const tickerSuffix = symbol.split('.').pop()?.toUpperCase();
   const isTW = tickerSuffix === 'TW' || tickerSuffix === 'TWO';
@@ -121,9 +109,8 @@ ${JSON.stringify(indicators)}
 2.  **新聞與情緒分析 (News & Sentiment)**: Compare retail sentiment from search results with professional analyst trends.
 3.  **全球趨勢與宏觀環境 (Global Macro)**: Anchor the analysis to the specific sector and industry trends.
 
-### STRATEGIC INTELLIGENCE TASK (MANDATORY)
-If the provided "FUNDAMENTAL DATA" is missing P/E, ROE, or Revenue Growth, you **MUST** use the 'googleSearch' tool to find the 3 most recent quarters of financial performance for **${name} (${symbol})**. Do NOT return null if data exists in the public domain. Fill the "metrics" object with your best verified estimates if exact API values are missing.
-    - Search Query Examples: "${name} ${symbol} P/E ratio 2024", "${name} 2317.TW ROE 財報".
+### strategic intent (MANDATORY)
+- Search Query Examples: "${name} ${symbol} P/E ratio 2024", "${name} 2317.TW ROE 財報".
 
 ### RESPONSE FORMAT (JSON ONLY)
 {
@@ -144,18 +131,18 @@ If the provided "FUNDAMENTAL DATA" is missing P/E, ROE, or Revenue Growth, you *
     "medium": {
       "description": "30-day strategy focusing on trend continuation (4-6 sentences).",
       "highlights": ["Bullet 1", "Bullet 2", "Bullet 3"],
-      "entry": "Optimal entry range",
-      "target": "Price level",
-      "stopLoss": "Price level",
+      "entry": "Optimal entry range (e.g. 95.00-97.00)",
+      "target": "Target price level (e.g. 110.00)",
+      "stopLoss": "Stop loss level (e.g. 88.00)",
       "winRate": 0-100,
       "riskLevel": "Medium|Low|High"
     },
     "long": {
       "description": "90-day fundamental outlook (4-6 sentences).",
       "highlights": ["Bullet 1", "Bullet 2", "Bullet 3"],
-      "entry": "Value-based entry",
-      "target": "Intrinsic value",
-      "stopLoss": "Long-term exit",
+      "entry": "Value entry level (e.g. 85.00-88.00)",
+      "target": "Intrinsic target value (e.g. 150.00)",
+      "stopLoss": "Long-term exit point (e.g. 70.00)",
       "winRate": 0-100,
       "riskLevel": "High|Medium|Low"
     }
@@ -190,25 +177,13 @@ Language Constraint: STRICTLY ${langName}. No markdown symbols.`;
 /**
  * Validates an API Key
  */
-export async function validateApiKey(apiKey: string, provider: string = 'google'): Promise<boolean> {
+export async function validateApiKey(apiKey: string, provider: string): Promise<boolean> {
   try {
-    if (provider === 'google') {
-      const ai = new GoogleGenAI({ apiKey });
-      await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: 'Hi'
-      });
-      return true;
-    } else if (provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      return res.ok;
-    }
-    return false;
+    const impl = getProvider(provider);
+    return await impl.validateKey(apiKey);
   } catch (error) {
-    console.error('API Key validation failed:', error);
-    throw new Error('Key validation failed.');
+    console.error('[AI] Key validation failed:', error);
+    return false;
   }
 }
 
@@ -216,33 +191,11 @@ export async function validateApiKey(apiKey: string, provider: string = 'google'
  * Returns available models
  */
 export async function fetchAvailableModels(apiKey: string, provider: string): Promise<{ id: string, name: string }[]> {
-  const models: { id: string, name: string }[] = [];
   try {
-    if (provider === 'google') {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.list();
-      const excluded = ['embedding', 'audio', 'live', 'robot', 'tts', 'vision', 'image', 'search'];
-
-      for await (const m of response) {
-        const id = m.name.replace('models/', '');
-        const lowerId = id.toLowerCase();
-        if (lowerId.includes('gemini') && !excluded.some(k => lowerId.includes(k))) {
-          const name = id.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-          models.push({ id, name });
-        }
-      }
-    } else if (provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const textModels = data.data.filter((m: any) => m.id.includes('gpt-4') || m.id.includes('gpt-3.5'));
-        textModels.forEach((m: any) => models.push({ id: m.id, name: m.id.toUpperCase() }));
-      }
-    }
+    const impl = getProvider(provider);
+    return await impl.listModels(apiKey);
   } catch (e) {
-    console.error('Error fetching models:', e);
+    console.error('[AI] Error fetching models:', e);
+    return [];
   }
-  return models;
 }

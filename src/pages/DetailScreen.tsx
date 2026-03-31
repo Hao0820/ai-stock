@@ -21,7 +21,8 @@ import {
   CheckCircle2,
   Info,
   ShieldCheck,
-  ChevronRight
+  ChevronRight,
+  Quote
 } from 'lucide-react';
 import { fetchStockDetail, StockDetailResult, ProcessedChartData, fetchLocalizedNames, fetchStockFundamentals, StockFundamentals } from '../api/yahoo';
 import { analyzeStock, stripMarkdown } from '../api/ai';
@@ -400,8 +401,8 @@ export function DetailScreen({
               )}
 
               <div className="relative flex-grow flex flex-col p-6 pr-2">
-                <div className="flex justify-between items-center mb-2 pl-2 z-10">
-                  <div className="flex bg-surface-container-high p-1 rounded-xl z-10 pointer-events-auto ml-auto mr-[25px]">
+                <div className="flex justify-center items-center mb-6 pl-2 z-10">
+                  <div className="flex bg-surface-container-high p-1 rounded-xl z-10 pointer-events-auto">
                     {(['D', 'W', 'M'] as Resolution[]).map((res) => (
                       <button
                         key={res}
@@ -434,11 +435,9 @@ export function DetailScreen({
               </div>
             </div>
           </section>
-
-          {/* Tactical & Strategy Overview */}
           <section className="w-full bg-surface-container rounded-[2.5rem] p-8 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-75">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
                   <Target className="w-7 h-7 text-primary" />
@@ -461,6 +460,7 @@ export function DetailScreen({
               </div>
             </div>
 
+            {/* Tactical Grid - Content */}
             {isAiLoading ? (
               <div className="animate-pulse space-y-6">
                 <div className="h-80 bg-on-surface/5 rounded-3xl border border-white/5"></div>
@@ -548,9 +548,14 @@ export function DetailScreen({
                           {(() => {
                             const val = aiAnalysis.timelines?.[aiTab]?.entry || aiAnalysis.entryPrice;
                             if (!val) return 'N/A';
-                            const match = val.match(/[0-9.]+(?:-[0-9.]+)?/);
+                            // Reuse cleaning logic for consistency
+                            const match = val.match(/[0-9,.]+(?:\s?[-~]\s?[0-9,.]+)?/);
                             const clean = match ? match[0] : val;
-                            return clean.replace(/([0-9.]+)/g, m => isNaN(parseFloat(m)) ? m : parseFloat(m).toFixed(2));
+                            return clean.replace(/([0-9,.]+)/g, m => {
+                              const raw = m.replace(/,/g, '');
+                              const n = parseFloat(raw);
+                              return isNaN(n) ? m : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            });
                           })()}
                         </p>
                       </div>
@@ -573,9 +578,16 @@ export function DetailScreen({
                         const timeline = aiAnalysis.timelines?.[aiTab];
 
                         const cleanPrice = (p: string) => {
-                          const match = p.match(/[0-9.]+(?:-[0-9.]+)?/);
+                          if (!p) return '--';
+                          // Match numbers, commas, dots and ranges (hyphen or tilde)
+                          const match = p.match(/[0-9,.]+(?:\s?[-~]\s?[0-9,.]+)?/);
                           const clean = match ? match[0] : p;
-                          return clean.replace(/([0-9.]+)/g, m => isNaN(parseFloat(m)) ? m : parseFloat(m).toFixed(2));
+                          // Format each number found within the clean segment
+                          return clean.replace(/([0-9,.]+)/g, m => {
+                            const raw = m.replace(/,/g, '');
+                            const n = parseFloat(raw);
+                            return isNaN(n) ? m : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          });
                         };
 
                         if (timeline) {
@@ -647,17 +659,17 @@ export function DetailScreen({
             ) : null}
           </section>
 
-          {/* 2. Integrated News Sentiment Analysis */}
-          <section className="w-full bg-surface-container rounded-3xl p-8 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
+          {/* 2. Integrated Deep Insights (Sentiment + Fundamentals) */}
+          <section className="w-full bg-surface-container rounded-[2.5rem] p-10 shadow-2xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-150">
             <div className="flex items-center gap-4 mb-10">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                <Newspaper className="w-6 h-6 text-primary" />
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
+                <BrainCircuit className="w-7 h-7 text-primary" />
               </div>
-              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.analysis.newsTitle')}</h3>
+              <h3 className="font-headline text-2xl font-black text-on-surface tracking-tight uppercase">{t('detail.analysis.deepInsight')}</h3>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-stretch">
-              {/* Left Column: Visual Sentiment */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+              {/* Left Column: Visual Sentiment Analytics */}
               <div className="flex flex-col items-center justify-center py-6 px-4">
                 <SentimentPieChart
                   sentiment={aiAnalysis?.sentiment || { positive: 0, neutral: 0, negative: 0 }}
@@ -665,43 +677,53 @@ export function DetailScreen({
                 />
               </div>
 
-              {/* Right Column: Tactical Summary */}
-              <div className="relative flex flex-col h-full min-h-[300px]">
+              {/* Right Column: Multi-Expert Insights */}
+              <div className="relative flex flex-col h-full min-h-[400px]">
                 {isAiLoading ? (
-                  <div className="h-full bg-on-surface/5 rounded-3xl animate-pulse" />
+                  <div className="h-full bg-on-surface/5 rounded-[2.5rem] animate-pulse" />
                 ) : aiAnalysis ? (
-                  <div className="h-full text-base text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-8 rounded-[2rem] border border-white/5 whitespace-pre-wrap shadow-inner overflow-auto custom-scrollbar">
-                    {stripMarkdown(aiAnalysis.newsSummary)}
+                  <div className="group relative h-full flex flex-col xl:flex-row items-center xl:items-stretch gap-0 xl:gap-4">
+                    <div className="flex-1 relative bg-surface-container/30 backdrop-blur-xl rounded-[2rem] border border-white/5 shadow-2xl group-hover:border-white/10 transition-all duration-500 overflow-hidden w-full">
+                      <div className="p-8 flex flex-col gap-10 overflow-auto h-full custom-scrollbar">
+                        {/* Sub-section: News Insight */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-4 opacity-50 uppercase tracking-[0.2em] text-[10px] font-black">
+                            <Newspaper className="w-4 h-4 text-primary" />
+                            <span>{t('detail.analysis.newsTitle')}</span>
+                          </div>
+                          <p className="text-base text-on-surface-variant leading-relaxed whitespace-pre-wrap font-medium">
+                            {stripMarkdown(aiAnalysis.newsSummary)}
+                          </p>
+                        </div>
+
+                        {/* Divider */}
+                        <div className="h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+                        {/* Sub-section: Fundamental Insight */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-4 opacity-50 uppercase tracking-[0.2em] text-[10px] font-black">
+                            <BarChart3 className="w-4 h-4 text-primary" />
+                            <span>{t('detail.experts.fundamental')}</span>
+                          </div>
+                          <p className="text-base text-on-surface-variant leading-relaxed whitespace-pre-wrap font-medium">
+                            {stripMarkdown(aiAnalysis.fundamentalSummary)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
             </div>
           </section>
 
-          {/* 4. Fundamental Standalone */}
-          <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-250">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                <BarChart3 className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.experts.fundamental')}</h3>
-            </div>
-            {isAiLoading ? (
-              <div className="h-20 bg-on-surface/5 rounded-2xl animate-pulse" />
-            ) : aiAnalysis ? (
-              <div className="text-base text-on-surface-variant leading-relaxed bg-surface-container-low p-6 rounded-2xl border border-white/5 whitespace-pre-wrap">
-                {stripMarkdown(aiAnalysis.fundamentalSummary)}
-              </div>
-            ) : null}
-          </section>
-
           {/* 5. Global Trend Standalone */}
           <section className="w-full bg-surface-container rounded-3xl p-8 shadow-xl border border-outline-variant/10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
             <div className="flex items-center gap-4 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-secondary/10 flex items-center justify-center shrink-0">
-                <Globe className="w-6 h-6 text-secondary" />
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 shadow-inner">
+                <Globe className="w-7 h-7 text-primary" />
               </div>
-              <h3 className="font-headline text-xl font-bold text-on-surface">{t('detail.experts.trend')}</h3>
+              <h3 className="font-headline text-2xl font-black text-on-surface tracking-tight">{t('detail.experts.trend')}</h3>
             </div>
             {isAiLoading ? (
               <div className="h-20 bg-on-surface/5 rounded-2xl animate-pulse" />

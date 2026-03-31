@@ -22,17 +22,17 @@ export const SentimentPieChart: React.FC<SentimentPieChartProps> = ({ sentiment,
   }
 
   const total = sentiment.positive + sentiment.neutral + sentiment.negative || 1;
-  const posAngle = (sentiment.positive / total) * 360;
-  const neuAngle = (sentiment.neutral / total) * 360;
-  // const negAngle = (sentiment.negative / total) * 360;
+  const segments = [
+    { percent: sentiment.positive / total, color: '#4EDE9F', gradient: 'posGrad', label: t('news.sentiment.positive'), start: 0, textCol: 'text-primary' },
+    { percent: sentiment.neutral / total, color: '#94A3B8', gradient: 'neuGrad', label: t('news.sentiment.neutral'), start: sentiment.positive / total, textCol: 'text-on-surface-variant' },
+    { percent: sentiment.negative / total, color: '#FF5252', gradient: 'negGrad', label: t('news.sentiment.negative'), start: (sentiment.positive + sentiment.neutral) / total, textCol: 'text-error' },
+  ];
 
-  // SVG parameters
   const size = 160;
   const center = size / 2;
   const radius = 60;
-  const strokeWidth = 12;
+  const strokeWidth = 14;
 
-  // Path helpers
   const getCoordinatesForPercent = (percent: number) => {
     const x = Math.cos(2 * Math.PI * percent);
     const y = Math.sin(2 * Math.PI * percent);
@@ -46,64 +46,109 @@ export const SentimentPieChart: React.FC<SentimentPieChartProps> = ({ sentiment,
     return `M ${center + radius * startX} ${center + radius * startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${center + radius * endX} ${center + radius * endY}`;
   };
 
-  const segments = [
-    { percent: sentiment.positive / total, color: '#4EDE9F', label: t('news.sentiment.positive'), start: 0 },
-    { percent: sentiment.neutral / total, color: '#94A3B8', label: t('news.sentiment.neutral'), start: sentiment.positive / total },
-    { percent: sentiment.negative / total, color: '#FF5252', label: t('news.sentiment.negative'), start: (sentiment.positive + sentiment.neutral) / total },
-  ];
-
   return (
-    <div className="flex flex-col md:flex-row items-center justify-around gap-8 py-8 w-full max-w-4xl mx-auto">
-      <div className="flex flex-col items-center gap-2">
-        <div className="relative w-40 h-40">
-          <svg viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90 drop-shadow-2xl">
+    <div className="flex flex-col xl:flex-row items-center gap-6 py-4 w-full">
+      {/* Chart Section */}
+      <div className="flex flex-col items-center gap-4 shrink-0">
+        <div className="relative w-44 h-44 group">
+          {/* Outer glow based on majority sentiment */}
+          <div className={`absolute inset-0 rounded-full blur-3xl opacity-20 transition-colors duration-1000 ${
+            sentiment.positive > 0.5 ? 'bg-primary' : sentiment.negative > 0.4 ? 'bg-error' : 'bg-secondary'
+          }`} />
+          
+          <svg viewBox={`0 0 ${size} ${size}`} className="relative transform -rotate-90 drop-shadow-[0_0_15px_rgba(0,0,0,0.5)] z-10 w-full h-full">
+            <defs>
+              <linearGradient id="posGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#4EDE9F" />
+                <stop offset="100%" stopColor="#10B981" />
+              </linearGradient>
+              <linearGradient id="neuGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#94A3B8" />
+                <stop offset="100%" stopColor="#64748B" />
+              </linearGradient>
+              <linearGradient id="negGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#FF5252" />
+                <stop offset="100%" stopColor="#DC2626" />
+              </linearGradient>
+            </defs>
+            
+            {/* Background track */}
+            <circle cx={center} cy={center} r={radius} fill="none" stroke="currentColor" strokeWidth={strokeWidth} className="text-white/5" />
+            
             {segments.map((seg, i) => (
               seg.percent > 0 && (
                 <motion.path
                   key={i}
                   d={createArc(seg.start, seg.start + seg.percent)}
                   fill="none"
-                  stroke={seg.color}
+                  stroke={`url(#${seg.gradient})`}
                   strokeWidth={strokeWidth}
                   strokeLinecap="round"
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{ pathLength: 1, opacity: 1 }}
-                  transition={{ duration: 1, delay: i * 0.2 }}
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: 1 }}
+                  transition={{ duration: 1.5, ease: "easeInOut", delay: i * 0.1 }}
                 />
               )
             ))}
-            {/* Background circle */}
-            <circle cx={center} cy={center} r={radius} fill="none" stroke="white" strokeWidth={1} opacity="0.05" />
           </svg>
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <span className="text-3xl font-headline font-extrabold text-on-surface">{Math.round(sentiment.positive * 100)}%</span>
+          
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant opacity-50 mb-[-4px]">
+              {t('news.sentiment.positive')}
+            </span>
+            <span className="text-4xl font-headline font-black text-on-surface">
+              {Math.round(sentiment.positive * 100)}%
+            </span>
           </div>
         </div>
-        {(() => {
-          if (sentiment.positive >= 0.6) return <span className="text-3xl font-headline font-bold text-primary">{t('history.sentiment.bullish')}</span>;
-          if (sentiment.negative >= 0.4) return <span className="text-3xl font-headline font-bold text-error">{t('history.sentiment.bearish')}</span>;
-          return <span className="text-3xl font-headline font-bold text-secondary">{t('history.sentiment.neutral')}</span>;
-        })()}
+        
+        <div className="flex flex-col items-center">
+          {(() => {
+            if (sentiment.positive >= 0.6) return (
+              <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-headline font-black text-primary tracking-tight">
+                {t('history.sentiment.bullish')}
+              </motion.span>
+            );
+            if (sentiment.negative >= 0.4) return (
+              <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-headline font-black text-error tracking-tight">
+                {t('history.sentiment.bearish')}
+              </motion.span>
+            );
+            return (
+              <motion.span initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-headline font-black text-on-surface-variant tracking-tight">
+                {t('history.sentiment.neutral')}
+              </motion.span>
+            );
+          })()}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 w-full">
-         {segments.map((seg, i) => (
-           <div key={i} className="flex items-center gap-3 bg-surface-container-low px-4 py-3 rounded-2xl border border-white/5 w-full">
-             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: seg.color }}></div>
-             <div className="flex flex-col flex-1">
-                <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">{seg.label}</span>
-                <span className="text-sm font-bold text-on-surface">{Math.round(seg.percent * 100)}%</span>
-             </div>
-             <div className="w-12 h-1 bg-surface-container-high rounded-full overflow-hidden">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${seg.percent * 100}%` }}
-                  className="h-full" 
-                  style={{ backgroundColor: seg.color }}
-                />
-             </div>
-           </div>
-         ))}
+      {/* Legend Stats */}
+      <div className="flex flex-col gap-4 w-full max-w-xs">
+        {segments.map((seg, i) => (
+          <div key={i} className="group flex flex-col gap-2">
+            <div className="flex justify-between items-end">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.2)]" style={{ backgroundColor: seg.color }}></div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant group-hover:text-on-surface transition-colors">
+                  {seg.label}
+                </span>
+              </div>
+              <span className={`text-lg font-headline font-black ${seg.textCol}`}>
+                {Math.round(seg.percent * 100)}%
+              </span>
+            </div>
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${seg.percent * 100}%` }}
+                transition={{ duration: 1, delay: 0.5 + i * 0.1 }}
+                className="h-full rounded-full shadow-[0_0_10px_rgba(255,255,255,0.1)]" 
+                style={{ backgroundColor: seg.color }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

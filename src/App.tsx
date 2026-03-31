@@ -46,14 +46,14 @@ export default function App() {
   const [activeSubModel, setActiveSubModel] = useState<string>('');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [selectedModel, setSelectedModel] = useState('google');
-  const [apiKeys, setApiKeys] = useState<{ google: string, openai: string, claude: string }>(() => {
+  const [apiKeys, setApiKeys] = useState<{ google: string, openai: string, claude: string, deepseek: string }>(() => {
     try {
       const saved = localStorage.getItem('ai-stock-keys');
-      const parsed = saved ? JSON.parse(saved) : { google: '', openai: '', claude: '' };
+      const parsed = saved ? JSON.parse(saved) : { google: '', openai: '', claude: '', deepseek: '' };
 
       // Sanitization: Ensure it's an object with the expected keys
       if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
-        return { google: '', openai: '', claude: '' };
+        return { google: '', openai: '', claude: '', deepseek: '' };
       }
 
       const cleanKey = (key: any, provider: string) => {
@@ -83,6 +83,9 @@ export default function App() {
         } else if (provider === 'claude') {
           const match = k.match(/ant-api[A-Za-z0-9_-]{80,}/);
           return match ? match[0] : '';
+        } else if (provider === 'deepseek') {
+          const match = k.match(/sk-[A-Za-z0-9]{32}/);
+          return match ? match[0] : k; // DeepSeek often uses 32-char sk keys
         }
 
         return k;
@@ -91,10 +94,11 @@ export default function App() {
       return {
         google: cleanKey(parsed.google, 'google'),
         openai: cleanKey(parsed.openai, 'openai'),
-        claude: cleanKey(parsed.claude, 'claude')
+        claude: cleanKey(parsed.claude, 'claude'),
+        deepseek: cleanKey(parsed.deepseek, 'deepseek')
       };
     } catch {
-      return { google: '', openai: '', claude: '' };
+      return { google: '', openai: '', claude: '', deepseek: '' };
     }
   });
 
@@ -178,7 +182,7 @@ export default function App() {
 
   const handleFullReset = () => {
     // Clear state
-    setApiKeys({ google: '', openai: '', claude: '' });
+    setApiKeys({ google: '', openai: '', claude: '', deepseek: '' });
     setAvailableModels({});
     setTheme('dark');
     setLanguage('zh-TW');
