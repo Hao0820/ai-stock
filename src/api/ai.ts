@@ -5,6 +5,26 @@ import { claudeProvider } from './providers/claude';
 import { deepseekProvider } from './providers/deepseek';
 import { AIProvider } from './providers/base';
 
+export enum AIErrorCode {
+  INVALID_API_KEY = 'INVALID_API_KEY',
+  API_LIMIT_REACHED = 'API_LIMIT_REACHED',
+  DATA_INCOMPLETE = 'DATA_INCOMPLETE',
+  PARSE_ERROR = 'PARSE_ERROR',
+  NETWORK_TIMEOUT = 'NETWORK_TIMEOUT',
+  UNKNOWN = 'UNKNOWN'
+}
+
+export class AIError extends Error {
+  constructor(
+    public code: AIErrorCode,
+    message: string,
+    public rawResponse?: string
+  ) {
+    super(message);
+    this.name = 'AIError';
+  }
+}
+
 /**
  * Returns the appropriate provider implementation
  */
@@ -40,11 +60,36 @@ async function callAi(prompt: string, apiKey: string, model: string): Promise<st
 }
 
 /**
- * Extracts JSON from potential markdown code blocks
+ * Extracts JSON from potential markdown code blocks and attempts to auto-heal it
  */
 export function extractJson(text: string): string {
-  const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/{[\s\S]*}/);
-  return jsonMatch ? jsonMatch[1] || jsonMatch[0] : text;
+  if (!text) return '{}';
+  
+  // 1. Try to find JSON in markdown blocks or between braces
+  const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || 
+                    text.match(/{[\s\S]*}/);
+  let jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text;
+
+  // 2. Auto-Healing Logic
+  try {
+    // 2.1 Remove trailing commas before closing braces/brackets
+    jsonString = jsonString.replace(/,\s*([\]}])/g, '$1');
+    
+    // 2.2 Fix unclosed braces (common for truncated responses)
+    const openBraces = (jsonString.match(/{/g) || []).length;
+    const closeBraces = (jsonString.match(/}/g) || []).length;
+    if (openBraces > closeBraces) {
+      jsonString += '}'.repeat(openBraces - closeBraces);
+    }
+
+    // 2.3 Remove control characters that break JSON.parse
+    jsonString = jsonString.replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
+
+    return jsonString;
+  } catch (e) {
+    console.warn('[AI] Auto-healing failed:', e);
+    return jsonString;
+  }
 }
 
 /**
@@ -90,6 +135,11 @@ ${isTW ? 'Note: This is a Taiwan-listed security. Ensure all news and fundamenta
 - ALL output MUST be in **${langName}**.
 - ${isZh ? 'Use financial terminology standard to the Taiwan/Hong Kong markets.' : 'Use professional international financial terminology.'}
 - **STRICT ENFORCEMENT**: USE THE NAME '${name}' CONSISTENTLY in the report.
+
+### DATA LIMITATION RECOURSE (CRITICAL)
+- IF Financial or News data passed in is NULL or labeled as "Limited/Unauthorized", **ACTIVELY ENGAGE YOUR INTERNAL KNOWLEDGE AND SEARCH CAPABILITIES**.
+- FOR ${name} (${symbol}): Analyze based on its industry moat, global market category (e.g., MSCI Taiwan / Semiconductors), and recent macro environment.
+- **NEVER** return empty summaries. Combine technical trend signals with historical ${name} performance to provide a professional "Sector Context Analysis" if live data is currently offline.
 
 ### MASTER INSTRUCTION
 You are a High-Precision, Senior Stock Analyst & Quantitative Strategist. Your mission is to perform an EXHAUSTIVE, multi-dimensional analysis for **${name} (${symbol})** currently trading at ${priceUnit} $${price} (${changePercent}%). Your report must be data-driven, objective, and structurally flawless.
@@ -164,13 +214,32 @@ Language Constraint: STRICTLY ${langName}. No markdown symbols.`;
 
   try {
     const rawResponse = await callAi(prompt, apiKey, modelId);
-    const jsonString = extractJson(rawResponse);
-    const parsed: any = JSON.parse(jsonString);
+    let jsonString = '';
+    
+    try {
+      jsonString = extractJson(rawResponse);
+      const parsed: any = JSON.parse(jsonString);
+      return parsed as AIAnalysis;
+    } catch (parseErr) {
+      console.error('AI Parsing failed. Raw response:', rawResponse);
+      throw new AIError(
+        AIErrorCode.PARSE_ERROR,
+        isZh ? 'AI 指令解讀失敗，格式無法解析' : 'AI response format could not be parsed',
+        rawResponse
+      );
+    }
+  } catch (err: any) {
+    if (err instanceof AIError) throw err;
 
-    return parsed as AIAnalysis;
-  } catch (err) {
-    console.error('AI Analysis failed:', err);
-    throw err;
+    // Map common HTTP errors to AIErrorCode
+    const msg = err.message?.toLowerCase() || '';
+    let code = AIErrorCode.UNKNOWN;
+    
+    if (msg.includes('429') || msg.includes('limit')) code = AIErrorCode.API_LIMIT_REACHED;
+    else if (msg.includes('key') || msg.includes('auth')) code = AIErrorCode.INVALID_API_KEY;
+    else if (msg.includes('timeout')) code = AIErrorCode.NETWORK_TIMEOUT;
+
+    throw new AIError(code, err.message || 'AI Analysis failed');
   }
 }
 

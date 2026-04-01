@@ -157,7 +157,7 @@ export function AnalysisTab({ onAnalyze, selectedModel, language, availableModel
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -5, scale: 0.98 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 right-0 mt-2 bg-surface-container border border-outline-variant/10 rounded-xl shadow-2xl z-[100] overflow-hidden drop-shadow-2xl"
+                    className="absolute top-full left-0 right-0 mt-2 bg-surface-container border border-outline-variant/10 rounded-xl shadow-2xl z-[100] overflow-y-auto max-h-72 drop-shadow-2xl custom-scrollbar"
                   >
                     {suggestions.map((s, i) => (
                       <div

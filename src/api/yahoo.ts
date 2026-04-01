@@ -76,36 +76,42 @@ export async function fetchStockFundamentals(symbol: string, language: 'zh-TW' |
   if (!symbol) return null;
   const targetSymbol = symbol.trim().toUpperCase();
   const modules = 'assetProfile,financialData,defaultKeyStatistics,summaryDetail,recommendationTrend,earnings';
-  
+
   try {
     const langParam = language === 'zh-TW' ? 'zh-Hant-TW' : 'en-US';
     const regionParam = language === 'zh-TW' ? 'TW' : 'US';
-    
-    // Concurrent fetch for robustness
-    const [summaryRes, quoteRes] = await Promise.all([
+
+    const [summaryRes, quoteRes] = await Promise.allSettled([
       fetch(`/api/yahoo/v10/finance/quoteSummary/${encodeURIComponent(targetSymbol)}?modules=${modules}&lang=${langParam}&region=${regionParam}`),
       fetch(`/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(targetSymbol)}&lang=${langParam}&region=${regionParam}`)
     ]);
-    
+
     let result: any = null;
     let quoteData: any = null;
 
-    if (summaryRes.ok) {
-      const summaryJson = await summaryRes.json();
+    if (summaryRes.status === 'fulfilled' && summaryRes.value.ok) {
+      const summaryJson = await summaryRes.value.json();
       result = summaryJson.quoteSummary?.result?.[0] || {};
+    } else {
+      console.warn(`[Yahoo] v10 QuoteSummary limited for ${targetSymbol} (Status: ${summaryRes.status === 'fulfilled' ? summaryRes.value.status : 'failed'})`);
     }
 
-    if (quoteRes.ok) {
-      const quoteJson = await quoteRes.json();
+    if (quoteRes.status === 'fulfilled' && quoteRes.value.ok) {
+      const quoteJson = await quoteRes.value.json();
       quoteData = quoteJson.finance?.result?.[0] || {};
+    } else {
+      console.warn(`[Yahoo] v7 Quote limited for ${targetSymbol} (Status: ${quoteRes.status === 'fulfilled' ? quoteRes.value.status : 'failed'})`);
     }
 
-    if (!result && !quoteData) return null;
-    
-    // Create base fundamentals
+    if (!result && !quoteData) {
+      // Slilence error as AI will fallback to general analysis
+      return null;
+    }
+
+    // Create base fundamentals with safe defaults
     const fundamentals: StockFundamentals = {
       symbol: targetSymbol,
-      assetProfile: result?.assetProfile,
+      assetProfile: result?.assetProfile || {},
       financialData: result?.financialData || {},
       defaultKeyStatistics: result?.defaultKeyStatistics || {},
       summaryDetail: result?.summaryDetail || {},
@@ -113,28 +119,20 @@ export async function fetchStockFundamentals(symbol: string, language: 'zh-TW' |
       earnings: result?.earnings || {}
     };
 
-    // Fallback/Augmentation logic from quoteData
+    // Robust Fallback from quoteData (v7 is often available even when v10 is 401)
     if (quoteData) {
-      // P/E Fallback
-      if (!fundamentals.summaryDetail.forwardPE && quoteData.forwardPE) {
-        fundamentals.summaryDetail.forwardPE = { raw: quoteData.forwardPE, fmt: String(quoteData.forwardPE) };
-      }
+      // P/E and other metrics often live in root level of v7 quote
       if (!fundamentals.summaryDetail.trailingPE && quoteData.trailingPE) {
-        fundamentals.summaryDetail.trailingPE = { raw: quoteData.trailingPE, fmt: String(quoteData.trailingPE) };
+        fundamentals.summaryDetail.trailingPE = { raw: quoteData.trailingPE, fmt: String(quoteData.trailingPE.toFixed(2)) };
       }
-      
-      // Recommendation Fallback
+      if (!fundamentals.financialData.targetMeanPrice && quoteData.targetPriceMean) {
+        fundamentals.financialData.targetMeanPrice = { raw: quoteData.targetPriceMean, fmt: String(quoteData.targetPriceMean) };
+      }
       if (!fundamentals.financialData.recommendationKey && quoteData.averageAnalystRating) {
-        // Map "1.5 - Buy" to "buy"
         const rating = quoteData.averageAnalystRating.toLowerCase();
         if (rating.includes('buy')) fundamentals.financialData.recommendationKey = 'buy';
         else if (rating.includes('sell')) fundamentals.financialData.recommendationKey = 'sell';
         else if (rating.includes('hold')) fundamentals.financialData.recommendationKey = 'hold';
-      }
-
-      // Target Price Fallback
-      if (!fundamentals.financialData.targetMeanPrice && quoteData.targetPriceMean) {
-         fundamentals.financialData.targetMeanPrice = { raw: quoteData.targetPriceMean, fmt: String(quoteData.targetPriceMean) };
       }
     }
 
@@ -159,7 +157,7 @@ export async function searchStockSuggestions(query: string, language: 'zh-TW' | 
     // Using v6 autocomplete for better localized search support
     const res = await fetch(`/api/yahoo/v6/finance/autocomplete?query=${encodeURIComponent(query)}&lang=${langParam}&region=${regionParam}`);
     if (!res.ok) return [];
-    
+
     const data = await res.json();
     const suggestions = data.ResultSet?.Result || [];
 
@@ -185,7 +183,7 @@ export async function searchStock(query: string, language: 'zh-TW' | 'en-US' = '
 
   // Detection: If query contains Non-ASCII (e.g., Chinese), it's likely a name
   const isPlainSymbol = /^[A-Z0-9.]+$/i.test(trimmed);
-  
+
   let targetSymbol = trimmed;
 
   if (!isPlainSymbol) {
@@ -220,24 +218,24 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
     console.log(`[Yahoo] Returning cached data for ${cacheKey}`);
     return cached.data;
   }
-  
+
   try {
     const langParam = language === 'zh-TW' ? 'zh-Hant-TW' : 'en-US';
     const regionParam = language === 'zh-TW' ? 'TW' : 'US';
     const res = await fetch(`/api/yahoo/v8/finance/chart/${encodeURIComponent(targetSymbol)}?interval=${interval}&range=${range}&lang=${langParam}&region=${regionParam}`);
     if (!res.ok) throw new Error('API Request Failed');
-    
+
     const data: YahooChartResponse = await res.json();
-    
+
     if (!data.chart.result || data.chart.result.length === 0) {
       return null;
     }
-    
+
     const chartResult = data.chart.result[0];
     const timestamps = chartResult.timestamp;
     const meta = chartResult.meta;
     const quote = (chartResult.indicators.quote && chartResult.indicators.quote[0]) ? chartResult.indicators.quote[0] : {} as any;
-    
+
     // Validate if it's a dead/delisted stock that returns empty indicators
     if (!timestamps || timestamps.length === 0) {
       return null;
@@ -272,22 +270,22 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
     const rsi14 = calculateRSI(cleanCloses, 14);
     const kd = calculateKD(cleanHighs, cleanLows, cleanCloses, 9);
     const macd = calculateMACD(cleanCloses, 12, 26, 9);
-    
+
     const chartData: ProcessedChartData[] = [];
-    
+
     for (let i = 0; i < cleanTimestamps.length; i++) {
       const date = new Date(cleanTimestamps[i] * 1000);
       let timeStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       if (interval.includes('m') || interval.includes('h')) {
         timeStr += ` ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
       } else if (interval === '1mo' || interval === '1wk') {
-           if (interval === '1mo') {
-             timeStr = date.toLocaleDateString('en-US', { year: '2-digit', month: 'short' });
-           } else {
-             timeStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-           }
+        if (interval === '1mo') {
+          timeStr = date.toLocaleDateString('en-US', { year: '2-digit', month: 'short' });
+        } else {
+          timeStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
       } else if (range === '1y' || range === 'max') {
-           timeStr = date.toLocaleDateString('en-US', { year: '2-digit', month: 'short' });
+        timeStr = date.toLocaleDateString('en-US', { year: '2-digit', month: 'short' });
       }
 
       const open = Number(cleanOpens[i]?.toFixed(2)) || 0;
@@ -338,7 +336,7 @@ export async function fetchStockDetail(symbol: string, range: string = '1mo', in
     stockCache[cacheKey] = { data: result, timestamp: Date.now() };
 
     return result;
-    
+
   } catch (error) {
     console.error('Error fetching chart data from Yahoo Finance:', error);
     return null;
@@ -354,11 +352,11 @@ export async function fetchLocalizedNames(symbol: string): Promise<{ en: string,
       searchStockSuggestions(symbol, 'en-US'),
       searchStockSuggestions(symbol, 'zh-TW')
     ]);
-    
+
     // Find exact match or default to first suggestion
     const enMatch = enRes.find(q => q.symbol.toUpperCase() === symbol.toUpperCase()) || enRes[0];
     const zhMatch = zhRes.find(q => q.symbol.toUpperCase() === symbol.toUpperCase()) || zhRes[0];
-    
+
     return {
       en: enMatch?.shortname || symbol,
       zh: zhMatch?.shortname || symbol

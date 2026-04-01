@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useTransition, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getADRSymbol } from '../utils/market';
 import {
   ArrowLeft,
   Sparkles,
@@ -22,15 +23,19 @@ import {
   Info,
   ShieldCheck,
   ChevronRight,
-  Quote
+  Quote,
+  X
 } from 'lucide-react';
 import { fetchStockDetail, StockDetailResult, ProcessedChartData, fetchLocalizedNames, fetchStockFundamentals, StockFundamentals } from '../api/yahoo';
-import { analyzeStock, stripMarkdown } from '../api/ai';
+import { analyzeStock, stripMarkdown, AIError, AIErrorCode } from '../api/ai';
 import { useTranslation } from '../contexts/LanguageContext';
 import { createChart, ColorType, CrosshairMode, LineStyle, IChartApi, Time, SeriesMarker } from 'lightweight-charts';
 import { AIAnalysis } from '../types';
 import { SentimentPieChart } from '../components/SentimentPieChart';
 import { useChart, Resolution } from '../hooks/useChart';
+
+// --- Global Tracker for Active Analysis to prevent double-calls in Strict Mode ---
+const activeAnalyses = new Set<string>();
 
 // --- Main Detail Screen ---
 
@@ -75,6 +80,7 @@ export function DetailScreen({
     M: null,
     fundamentals: null
   });
+  const [adrQuote, setAdrQuote] = useState<{ symbol: string, changePercent: number } | null>(null);
 
   // Use Custom Hook for Chart Logic
   const {
@@ -93,26 +99,39 @@ export function DetailScreen({
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiErrorCode, setAiErrorCode] = useState<AIErrorCode | null>(null);
+  const [debugRawResponse, setDebugRawResponse] = useState<string | null>(null);
+  const [showDebugModal, setShowDebugModal] = useState(false);
   const [recordNames, setRecordNames] = useState<{ zh: string, en: string } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     async function loadAllData() {
+      if (!isMounted) return;
+      setIsLoading(true);
+      const { analysisDb } = await import('../utils/db');
+
+      // --- PHASE 1: ATTEMPT TO LOAD FROM DB ---
       if (recordId) {
-        // Load from DB instead of API
-        const { analysisDb } = await import('../utils/db');
         const record = await analysisDb.getRecord(recordId);
-        if (record && isMounted) {
-          setDataStore(record.ohlcv as any);
+        
+        if (record && record.analysis && isMounted) {
+          console.log(`[Detail] Restoring record snapshot for ${record.symbol}`);
+          
+          if (record.ohlcv) {
+            setDataStore(record.ohlcv as any);
+          }
+          
           setAiAnalysis(record.analysis);
           setRecordNames({ zh: record.nameZh || '', en: record.nameEn || '' });
-          setIsLoading(false);
+          
           setIsAiLoading(false);
+          setIsLoading(false);
+          return; // STOP HERE: History restore complete
         }
-        return;
       }
 
-      setIsLoading(true);
+      // --- PHASE 2: LIVE FETCH ---
       try {
         const [resD, resW, resM, resFunds] = await Promise.all([
           fetchStockDetail(stock, '2y', '1d', language),
@@ -123,6 +142,16 @@ export function DetailScreen({
 
         if (isMounted) {
           setDataStore({ D: resD, W: resW, M: resM, fundamentals: resFunds });
+          
+          // ADR Check (Only in Live Mode)
+          const adrSym = getADRSymbol(stock);
+          if (adrSym) {
+            fetchStockDetail(adrSym, '1d', '1d', language).then(adrRes => {
+              if (adrRes && isMounted) {
+                setAdrQuote({ symbol: adrRes.symbol, changePercent: adrRes.changePercent });
+              }
+            });
+          }
           setIsLoading(false);
         }
       } catch (err) {
@@ -131,6 +160,10 @@ export function DetailScreen({
       }
     }
     loadAllData();
+    
+    // Ensure the page starts at the top when landing on DetailScreen
+    window.scrollTo(0, 0);
+
     return () => { isMounted = false; };
   }, [stock, recordId, language]);
 
@@ -164,8 +197,14 @@ export function DetailScreen({
     if (!dailyDetail || !stockDetail || aiAnalysis || isAiLoading || aiError) return;
 
     const runAnalysis = async () => {
+      // Guard against double calls for the same record (Strict Mode remount)
+      if (activeAnalyses.has(recordId || '')) return;
+      if (recordId) activeAnalyses.add(recordId);
+
       setIsAiLoading(true);
       setAiError(null);
+      setAiErrorCode(null);
+      setDebugRawResponse(null);
 
       const provider = selectedModel as 'google' | 'openai' | 'claude';
       const key = apiKeys[provider];
@@ -224,6 +263,14 @@ export function DetailScreen({
           language as 'zh-TW' | 'en-US',
           dataStore.fundamentals
         ).then(async (result) => {
+          // --- CRITICAL CHECK: Has the record been deleted while we were waiting for AI? ---
+          const existingRecord = await analysisDb.getRecord(newRecordId);
+          if (!existingRecord) {
+            console.log(`[AI Client] Record ${newRecordId} no longer exists (likely deleted). Skipping final save.`);
+            if (recordId) activeAnalyses.delete(recordId);
+            return;
+          }
+
           // Re-fetch current record state to avoid overwriting newer status if any
           const updatedRecord = {
             ...skeletonRecord,
@@ -235,10 +282,18 @@ export function DetailScreen({
           // Update local UI state if user is still on this screen
           setAiAnalysis(result);
           setIsAiLoading(false);
+          if (recordId) activeAnalyses.delete(recordId);
         }).catch((err: any) => {
           console.error("Background AI Analysis failed:", err);
-          setAiError(err.message || 'AI Analysis failed');
+          if (err instanceof AIError) {
+            setAiErrorCode(err.code);
+            setAiError(err.message);
+            setDebugRawResponse(err.rawResponse || null);
+          } else {
+            setAiError(err.message || 'AI Analysis failed');
+          }
           setIsAiLoading(false);
+          if (recordId) activeAnalyses.delete(recordId);
         });
 
       } catch (err: any) {
@@ -340,24 +395,110 @@ export function DetailScreen({
                 className="w-full bg-error/10 border border-error/20 rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl"
               >
                 <div className="flex items-center gap-5">
-                  <div className="w-12 h-12 bg-error/20 rounded-2xl flex items-center justify-center text-error">
-                    <ShieldAlert className="w-6 h-6" />
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                    aiErrorCode === AIErrorCode.INVALID_API_KEY ? 'bg-orange-400/20 text-orange-400' :
+                    aiErrorCode === AIErrorCode.API_LIMIT_REACHED ? 'bg-yellow-400/20 text-yellow-400' :
+                    'bg-error/20 text-error'
+                  }`}>
+                    {aiErrorCode === AIErrorCode.INVALID_API_KEY ? <Settings className="w-6 h-6" /> :
+                     aiErrorCode === AIErrorCode.PARSE_ERROR ? <BrainCircuit className="w-6 h-6" /> :
+                     <ShieldAlert className="w-6 h-6" />}
                   </div>
-                  <div className="text-left">
-                    <h4 className="font-headline font-bold text-on-surface">{t('detail.analysis.failed')}</h4>
+                  <div className="text-left flex-grow">
+                    <h4 className="font-headline font-bold text-on-surface">
+                      {aiErrorCode === AIErrorCode.PARSE_ERROR ? t('detail.analysis.failed.parse') :
+                       aiErrorCode === AIErrorCode.API_LIMIT_REACHED ? t('detail.analysis.failed.limit') :
+                       aiErrorCode === AIErrorCode.INVALID_API_KEY ? t('detail.analysis.failed.key') :
+                       t('detail.analysis.failed')}
+                    </h4>
                     <p className="text-sm text-on-surface-variant max-w-md">{aiError}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setAiError(null);
-                    setAiAnalysis(null);
-                    skeletonSavedRef.current = false;
-                  }}
-                  className="px-8 py-3 bg-error text-on-error rounded-2xl font-bold text-sm hover:brightness-110 active:scale-95 transition-all w-full md:w-auto"
+                <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                  {debugRawResponse && (
+                    <button
+                      onClick={() => setShowDebugModal(true)}
+                      className="px-6 py-3 bg-surface-container-high text-on-surface rounded-2xl font-bold text-sm hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Info className="w-4 h-4" />
+                      {t('detail.analysis.checkError')}
+                    </button>
+                  )}
+                  {aiErrorCode === AIErrorCode.INVALID_API_KEY ? (
+                    <button
+                      onClick={onSettingsClick}
+                      className="px-8 py-3 bg-primary text-on-primary rounded-2xl font-bold text-sm hover:brightness-110 active:scale-95 transition-all"
+                    >
+                      {t('settings.title')}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setAiError(null);
+                        setAiErrorCode(null);
+                        setAiAnalysis(null);
+                        skeletonSavedRef.current = false;
+                      }}
+                      className="px-8 py-3 bg-error text-on-error rounded-2xl font-bold text-sm hover:brightness-110 active:scale-95 transition-all"
+                    >
+                      {t('detail.analysis.retry')}
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Debug Modal */}
+          <AnimatePresence>
+            {showDebugModal && debugRawResponse && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-surface/90 backdrop-blur-xl"
+              >
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className="bg-surface-container-high w-full max-w-3xl max-h-[80vh] rounded-[2.5rem] border border-outline-variant/20 shadow-2xl flex flex-col overflow-hidden"
                 >
-                  {t('detail.analysis.retry')}
-                </button>
+                  <div className="p-8 border-b border-outline-variant/10 flex justify-between items-center bg-surface-container-highest/30">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-primary/10 rounded-2xl">
+                        <BrainCircuit className="w-6 h-6 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black">{t('detail.analysis.debug.title')}</h3>
+                        <p className="text-xs text-on-surface-variant font-bold uppercase tracking-widest">{t('detail.analysis.debug.subtitle')}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowDebugModal(false)}
+                      className="p-3 hover:bg-on-surface/5 rounded-2xl text-on-surface-variant transition-colors"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+                  <div className="p-8 overflow-auto flex-grow bg-surface-container-low/50">
+                    <div className="bg-[#0d1117] p-6 rounded-3xl border border-white/5 font-mono text-sm text-[#c9d1d9] leading-relaxed overflow-x-auto whitespace-pre-wrap">
+                      <div className="flex items-center gap-2 text-rose-400 mb-4 pb-4 border-b border-white/5">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span className="font-bold">Raw Response from AI:</span>
+                      </div>
+                      {debugRawResponse}
+                    </div>
+                  </div>
+                  <div className="p-8 bg-surface-container-highest/20 border-t border-outline-variant/10">
+                    <button
+                      onClick={() => setShowDebugModal(false)}
+                      className="w-full py-4 bg-primary text-on-primary rounded-2xl font-black text-sm tracking-[0.1em] uppercase shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                      {language === 'zh-TW' ? '了解並關閉' : 'Understand & Close'}
+                    </button>
+                  </div>
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -475,14 +616,15 @@ export function DetailScreen({
                       { key: 'roe', label: t('detail.analysis.roe'), val: aiAnalysis.metrics.roe, format: (v: number) => `${v.toFixed(1)}%`, icon: Activity },
                       { key: 'revenueGrowth', label: t('detail.analysis.revenueGrowth'), val: aiAnalysis.metrics.revenueGrowth, format: (v: number) => `${v.toFixed(1)}%`, icon: TrendingUp, color: aiAnalysis.metrics.revenueGrowth && aiAnalysis.metrics.revenueGrowth > 0 ? 'text-red-400' : 'text-green-400' },
                       { key: 'analystTarget', label: t('detail.analysis.analystTarget'), val: aiAnalysis.metrics.analystTarget, format: (v: number) => `$${v.toFixed(1)}`, icon: Target },
+                      { key: 'adr', label: adrQuote ? `美股 ADR (${adrQuote.symbol})` : '美股 ADR', val: adrQuote?.changePercent, format: (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`, icon: Globe, color: adrQuote ? (candleColorStyle === 'red-up' ? (adrQuote.changePercent >= 0 ? 'text-red-400' : 'text-green-400') : (adrQuote.changePercent >= 0 ? 'text-green-400' : 'text-red-400')) : 'text-on-surface-variant/30' },
                       { key: 'shortPercentOfFloat', label: t('detail.analysis.shortInterest'), val: aiAnalysis.metrics.shortPercentOfFloat, format: (v: number) => `${v.toFixed(1)}%`, icon: ShieldAlert, color: aiAnalysis.metrics.shortPercentOfFloat && aiAnalysis.metrics.shortPercentOfFloat > 10 ? 'text-orange-400' : 'text-on-surface' },
                       { key: 'recommendationKey', label: t('detail.analysis.recommendation'), val: aiAnalysis.metrics.recommendationKey, format: (v: string) => v.toUpperCase(), icon: Rocket, color: 'text-primary' }
-                    ].map((m, idx) => (
+                    ].filter(m => m.val !== undefined && m.val !== null).map((m, idx) => (
                       <div key={idx} className="bg-surface-container-low/40 backdrop-blur-md p-4 rounded-[1.5rem] border border-white/5 flex flex-col items-center justify-center group hover:bg-surface-container-high/60 transition-all duration-300 shadow-sm relative overflow-hidden">
                         <m.icon className="w-4 h-4 text-on-surface-variant/30 mb-2 group-hover:text-primary/50 transition-colors" />
                         <span className="text-[9px] text-on-surface-variant font-black uppercase tracking-widest mb-1 opacity-60 text-center">{m.label}</span>
                         <span className={`text-base font-headline font-black tracking-tight ${m.color || 'text-on-surface'}`}>
-                          {m.val !== undefined && m.val !== null ? m.format(m.val as never) : '--'}
+                          {m.format(m.val as never)}
                         </span>
                       </div>
                     ))}
@@ -544,7 +686,7 @@ export function DetailScreen({
                           <span className="text-[11px] text-on-surface-variant font-black uppercase tracking-widest opacity-60">{t('detail.analysis.entryRange')}</span>
                           <Rocket className="w-4 h-4 text-on-surface-variant/20 group-hover:text-primary/40" />
                         </div>
-                        <p className="text-xl md:text-2xl font-headline font-black text-on-surface tracking-tight truncate">
+                        <p className="text-lg sm:text-xl md:text-2xl font-headline font-black text-on-surface tracking-tight break-words">
                           {(() => {
                             const val = aiAnalysis.timelines?.[aiTab]?.entry || aiAnalysis.entryPrice;
                             if (!val) return 'N/A';

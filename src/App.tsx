@@ -163,7 +163,9 @@ export default function App() {
 
   const handleViewDetail = (symbol: string, name: string, model?: string) => {
     setSelectedStock({ symbol, name });
-    setSelectedRecordId(null); // Clear record if we are doing a new search
+    // Generate the ID here so it's stable across remounts/renders of DetailScreen
+    const newId = `record_${Date.now()}_${symbol}`;
+    setSelectedRecordId(newId);
     if (model) setActiveSubModel(model);
     setLastParentScreen('main');
     setCurrentScreen('detail');

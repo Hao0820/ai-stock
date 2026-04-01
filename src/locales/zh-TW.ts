@@ -116,7 +116,6 @@ export const zhTW = {
 
   // News Sentiment
   'news.sentiment.title': '新聞情緒分析',
-  'news.sentiment.bullish': '看漲 Bullish',
   'news.sentiment.positive': '正面情緒',
   'news.sentiment.neutral': '中立',
   'news.sentiment.negative': '負面',
@@ -127,7 +126,7 @@ export const zhTW = {
 
   // AI Multi-dimensional
   'ai.multi.title': 'AI 多維度規劃',
-  'ai.multi.subtitle': 'Neural Engine v4.2 Analysis (Demo Data)',
+  'ai.multi.subtitle': 'Neural Engine v4.2 Analysis',
   'ai.multi.tab.short': '近期',
   'ai.multi.tab.medium': '中期',
   'ai.multi.tab.long': '遠期',
@@ -137,10 +136,16 @@ export const zhTW = {
   'detail.analysis.entry': '建議進場',
   'detail.analysis.entryRange': '進場區間',
   'detail.analysis.exit': '目標出場',
-  'detail.analysis.stopLoss': '停損',
-  'detail.analysis.takeProfit': '目標價',
-  'detail.analysis.failed': 'AI 分析失敗',
-  'detail.analysis.retry': '重試分析',
+  'detail.analysis.stopLoss': '停損參考',
+  'detail.analysis.takeProfit': '目標價位',
+  'detail.analysis.failed': 'AI 分析暫時無法完成',
+  'detail.analysis.failed.parse': 'AI 解析格式錯誤',
+  'detail.analysis.failed.limit': 'API 調用次數達到上限',
+  'detail.analysis.failed.key': 'API 金鑰無效或餘額不足',
+  'detail.analysis.checkError': '檢查錯誤',
+  'detail.analysis.debug.title': 'AI 診斷偵錯台',
+  'detail.analysis.debug.subtitle': '原始回傳內容分析',
+  'detail.analysis.retry': '重新分析',
   'detail.experts.title': '專家戰略報告',
   'detail.experts.fundamental': '基本面分析',
   'detail.experts.news': '新聞情緒',
@@ -164,16 +169,9 @@ export const zhTW = {
   'detail.analysis.highlights': '戰術亮點',
   'detail.timeline.title': '近期中期遠期規劃',
 
-  'ai.multi.short.title': '突破訊號確認',
-  'ai.multi.short.desc': '短期內股價形成強力支撐。隨着 5 MA 向上穿越 20 MA，技術面呈現典型的多頭排列。',
-  'ai.multi.medium.title': '基本面優化',
-  'ai.multi.medium.desc': '中期（1-3 季）核心動能來自營收穩定成長與良率提升。預計毛利率將穩定增長。',
-  'ai.multi.long.title': '全球佈局與領導地位',
-  'ai.multi.long.desc': '長期戰略重點在於技術護城河的鞏固。',
-
   // Disclaimer
   'disclaimer.title': '投資建議免責聲明',
-  'disclaimer.desc': '本分析報告目前部份文字由靜態預覽生成，圖表與頂部報價為真實市場資料。僅供參考之用，不構成任何形式的投資建議、要約或邀請。',
+  'disclaimer.desc': '分析報告由 AI 引擎根據歷史數據與即時指標推演生成，僅供參考之用，不構成任何形式的投資建議、要約或邀請。',
   'disclaimer.agreement': '點擊「開始分析」即表示您已閱讀並同意以上免責聲明。',
 };
 

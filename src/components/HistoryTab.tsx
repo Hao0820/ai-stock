@@ -218,9 +218,9 @@ export function HistoryTab({
                         {sentiment.icon}
                       </div>
                       
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-headline font-bold text-xl text-on-surface tracking-tight truncate">
+                      <div className="flex flex-col flex-1 min-w-0 pr-2">
+                        <div className="flex items-center gap-2 mb-0.5 overflow-hidden">
+                          <span className="font-headline font-bold text-lg sm:text-xl text-on-surface tracking-tight truncate shrink-0">
                             {record.symbol}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold tracking-widest uppercase ${sentiment.style}`}>
